@@ -3,7 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.21005.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fable", "Fable.csproj", "{F491A57F-03E6-48DC-A241-31BD5EA69622}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataFile", "DataFile.csproj", "{F491A57F-03E6-48DC-A241-31BD5EA69622}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConsole", "TestConsole\TestConsole.csproj", "{EF08AA16-9057-4CFE-A6FA-E7D1ADCC48AA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{F491A57F-03E6-48DC-A241-31BD5EA69622}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F491A57F-03E6-48DC-A241-31BD5EA69622}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F491A57F-03E6-48DC-A241-31BD5EA69622}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF08AA16-9057-4CFE-A6FA-E7D1ADCC48AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF08AA16-9057-4CFE-A6FA-E7D1ADCC48AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF08AA16-9057-4CFE-A6FA-E7D1ADCC48AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF08AA16-9057-4CFE-A6FA-E7D1ADCC48AA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

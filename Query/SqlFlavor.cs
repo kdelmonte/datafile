@@ -1,4 +1,4 @@
-﻿namespace Fable
+﻿namespace DataFile.Query
 {
     public enum SqlFlavor
     {

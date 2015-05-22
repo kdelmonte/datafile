@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace Fable
+namespace DataFile
 {
     public static class Utilities
     {

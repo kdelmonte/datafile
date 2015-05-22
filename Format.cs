@@ -1,13 +1,15 @@
-﻿namespace Fable
+﻿namespace DataFile
 {
     public enum Format
     {
         Unknown = 0,
-        CSV = 1,
-        Excel = 2,
-        FileSessionImport = 3,
-        PipeDelimited = 4,
-        SpaceDelimited = 5,
-        TabDelimited = 6
+        FileSessionImport = 1,
+        CharachterDelimited = 2,
+        CommaDelimited = 3,
+        XLSX = 4,
+        XLS = 5,
+        PipeDelimited = 6,
+        SpaceDelimited = 7,
+        TabDelimited = 8
     }
 }

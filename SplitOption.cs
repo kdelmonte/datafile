@@ -1,4 +1,4 @@
-﻿namespace Fable
+﻿namespace DataFile
 {
     public class SplitOption
     {

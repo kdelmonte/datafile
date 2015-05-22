@@ -1,7 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.IO;
 
-namespace Fable
+namespace DataFile
 {
     public class DirectorySummary
     {

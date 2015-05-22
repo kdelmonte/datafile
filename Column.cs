@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace Fable
+namespace DataFile
 {
     public class Column
     {

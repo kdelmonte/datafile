@@ -1,7 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 
-namespace Fable
+namespace DataFile
 {
     public sealed class ColumnList : ObservableCollection<Column>
     {

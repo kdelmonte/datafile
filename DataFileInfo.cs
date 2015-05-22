@@ -2,17 +2,19 @@
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Data;
-using System.Data.OleDb;
 using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
+using DataFile.Query;
+using Excel;
 
-namespace Fable
+namespace DataFile
 {
-    public class FableInfo
+    public class DataFileInfo
     {
         #region DataFile
 
@@ -28,12 +30,11 @@ namespace Fable
         public SqlConnectionStringBuilder ConnectionStringBuilder;
         public int TotalRecords;
         private string _connectionString;
-        private OleDbConnection _excelConnection;
         private Layout _layout;
 
-        public FableInfo()
+        public DataFileInfo()
         {
-            UniqueIdentifier = Guid.NewGuid().ToString();
+            UniqueIdentifier = Guid.NewGuid().ToString("N");
             HasColumnHeaders = true;
             AggregatableColumns = new ColumnList();
             SampleRows = new List<List<string>>();
@@ -41,26 +42,26 @@ namespace Fable
             InitializeColumnList();
         }
 
-        public FableInfo(string filePath, string connectionString = null) : this()
+        public DataFileInfo(string filePath, string connectionString = null) : this()
         {
             _connectionString = connectionString;
             Initialize(filePath, true);
         }
 
-        public FableInfo(string filePath, bool fileHasColumns, string connectionString = null) : this()
+        public DataFileInfo(string filePath, bool fileHasColumns, string connectionString = null) : this()
         {
             _connectionString = connectionString;
             Initialize(filePath, fileHasColumns);
         }
 
-        public FableInfo(string source, Layout layout, string connectionString = null) : this()
+        public DataFileInfo(string source, Layout layout, string connectionString = null) : this()
         {
             _connectionString = connectionString;
             Layout = layout;
-            Initialize(source, Layout.HasColumnHeaders);
+            Initialize(source, Layout != null && Layout.HasColumnHeaders);
         }
 
-        public string UniqueIdentifier { get; set; }
+        public string UniqueIdentifier { get; private set; }
 
         public ColumnList AggregatableColumns { get; set; }
         public ColumnList Columns { get; set; }
@@ -111,7 +112,11 @@ namespace Fable
             set
             {
                 _layout = value;
-                Columns = _layout.Columns;
+                if (_layout != null)
+                {
+                    Columns = _layout.Columns;
+                }
+                
             }
         }
 
@@ -126,7 +131,7 @@ namespace Fable
             Columns = new ColumnList(ColumnList_CollectionChanged);
         }
 
-        ~FableInfo()
+        ~DataFileInfo()
         {
             if (!LeaveSessionOpenOnDispose)
             {
@@ -144,22 +149,18 @@ namespace Fable
             }
         }
 
-        private OleDbConnection CreateExcelConnection(bool firstRowHasColumns)
+        private IExcelDataReader GetExcelDataReader(bool preventColumnRowSkip = false)
         {
-            var strConn = "";
-            var hdr = firstRowHasColumns ? "Yes" : "No";
-            switch (Extension.ToLower().Replace(".", ""))
+            var stream = File.Open(FullName, FileMode.Open, FileAccess.Read);
+            var reader = Format == Format.XLSX
+                                ? ExcelReaderFactory.CreateOpenXmlReader(stream)
+                                : ExcelReaderFactory.CreateBinaryReader(stream);
+            reader.IsFirstRowAsColumnNames = HasColumnHeaders;
+            if (!preventColumnRowSkip && HasColumnHeaders)
             {
-                case "xls":
-                    strConn = "Provider=Microsoft.Jet.OLEDB.4.0;" + "Data Source=" + FullName +
-                              ";Extended Properties=\"Excel 8.0;HDR=" + hdr + ";IMEX=1\"";
-                    break;
-                case "xlsx":
-                    strConn = "Provider=Microsoft.ACE.OLEDB.12.0;" + "Data Source=" + FullName +
-                              ";Extended Properties=\"Excel 12.0;HDR=" + hdr + ";IMEX=1\"";
-                    break;
+                reader.Read();
             }
-            return new OleDbConnection(strConn);
+            return reader;
         }
 
         public void SwitchToWorkSheet(int sheetIndex)
@@ -169,65 +170,204 @@ namespace Fable
 
         public void SwitchToWorkSheet(string sheetName)
         {
+            IExcelDataReader excelReader = null;
             Columns.Clear();
             SampleRows.Clear();
             ActiveWorksheet = sheetName;
             try
             {
-                if (_excelConnection.State == ConnectionState.Closed)
-                {
-                    _excelConnection.Open();
-                }
-
-                var cmd = new OleDbCommand("SELECT * FROM [" + sheetName + "]", _excelConnection) {CommandType = CommandType.Text};
-                OleDbDataReader dr;
-                try
-                {
-                    dr = cmd.ExecuteReader(CommandBehavior.Default);
-                }
-                catch
-                {
-                    sheetName = sheetName.Replace("$", "");
-                    cmd = new OleDbCommand("SELECT * FROM [" + sheetName + "]", _excelConnection) {CommandType = CommandType.Text};
-                    dr = cmd.ExecuteReader(CommandBehavior.Default);
-                }
-                if (dr == null) throw new Exception("DataReader cannot be null");
-                var j = 0;
+                excelReader = GetExcelDataReader(true);
                 if (HasColumnHeaders)
                 {
-                    for (var f = 0; f < dr.FieldCount; f++)
+                    excelReader.Read();
+                    for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        Columns.Add(new Column(f, dr.GetName(f)));
+                        var columnName = excelReader[x].ToString().Trim();
+                        Columns.Add(new Column(x, columnName));
                     }
                 }
                 else
                 {
-                    for (var f = 0; f < dr.FieldCount; f++)
+                    for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        Columns.Add(new Column(f, DefaultColumnName + (f + 1)));
+                        Columns.Add(new Column(x, DefaultColumnName + (x + 1)));
                     }
                 }
 
-                while (dr.Read())
+                var i = 0;
+                while (excelReader.Read())
                 {
-                    var FieldValues = new List<string>();
-                    if (j >= NumberOfExampleRows)
+                    var fieldValues = new List<string>();
+                    if (i >= NumberOfExampleRows)
                     {
                         break;
                     }
-                    for (var f = 0; f < dr.FieldCount; f++)
+                    for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        var value = dr[f].ToString().Trim();
-                        FieldValues.Add(value);
+                        var value = Convert.ToString(excelReader[x]);
+                        fieldValues.Add(value);
                     }
 
-                    SampleRows.Add(FieldValues);
-                    j++;
+                    SampleRows.Add(fieldValues);
+                    i++;
                 }
             }
             finally
             {
-                _excelConnection.Close();
+                if (excelReader != null) excelReader.Close();
+            }
+        }
+
+        private void InitializeExcelFile()
+        {
+            IExcelDataReader excelReader = null;
+            try
+            {
+                excelReader = GetExcelDataReader();
+                ExcelSheets = new List<string>();
+                for (var x = 0; x < excelReader.ResultsCount; x++)
+                {
+                    ExcelSheets.Add(excelReader.Name);
+                    excelReader.NextResult();
+                }
+                excelReader.Close();
+                if (ExcelSheets.Any())
+                {
+                    SwitchToWorkSheet(0);
+                }
+            }
+            finally
+            {
+                if (excelReader != null)
+                {
+                    excelReader.Close();
+                }
+            }
+        }
+
+        public void InitializeDelimitedFile()
+        {
+            StreamReader reader = null;
+            try
+            {
+                reader = File.OpenText(FullName);
+                var firstLine = reader.ReadLine();
+                if (firstLine != null)
+                {
+                    if (Extension.ToLower() == ".csv") // trust the extension
+                    {
+                        FieldDelimeter = ",";
+                        SetFormatBasedOnDelimeter();
+                    }
+                    else
+                    {
+                        var delimeters = new[] { "\t", ",", "|", SpecialFieldDelimeter };
+                        foreach (var delimeter in delimeters)
+                        {
+                            if (!firstLine.Contains(delimeter)) continue;
+                            FieldDelimeter = delimeter;
+                            SetFormatBasedOnDelimeter();
+                            break;
+                        }
+                    }
+                    if (FieldDelimeter.Length > 0)
+                    {
+                        var j = 0;
+                        var columns = SplitByFormat(firstLine);
+                        if (HasColumnHeaders)
+                        {
+                            for (var i = 0; i < columns.Length; i++)
+                            {
+                                Columns.Add(new Column(i, columns[i]));
+                            }
+                        }
+                        else
+                        {
+                            for (var i = 0; i < columns.Length; i++)
+                            {
+                                Columns.Add(new Column(i, DefaultColumnName + (i + 1)));
+                            }
+                            SampleRows.Add(columns.ToList());
+                            j++;
+                        }
+                        while (j < NumberOfExampleRows)
+                        {
+                            var row = reader.ReadLine();
+                            if (row == null)
+                            {
+                                break;
+                            }
+                            var fieldItems = SplitByFormat(row).ToList();
+                            for (var x = 0; x < fieldItems.Count; x++)
+                            {
+                                fieldItems[x] = fieldItems[x].Trim();
+                            }
+                            SampleRows.Add(fieldItems);
+                            j++;
+                        }
+                    }
+                    else
+                    {
+                        var j = 0;
+                        HasColumnHeaders = Layout != null && Layout.Columns.Count > 0;
+                        if (HasColumnHeaders)
+                        {
+                            var columnLine = firstLine.ToLower();
+                            foreach (var column in Columns)
+                            {
+                                if (columnLine.Substring(column.Start, column.Length).Trim() ==
+                                    column.Name.ToLower()) continue;
+                                HasColumnHeaders = false;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            Columns.Add(new Column(0, DefaultColumnName + 1));
+                            SampleRows.Add(new List<string> { TrimQuoteDelimeters(firstLine) });
+                            j++;
+                        }
+                        Format = Format.SpaceDelimited;
+                        while (j < NumberOfExampleRowsIfFixedWidth)
+                        {
+                            var row = reader.ReadLine();
+                            if (row == null)
+                            {
+                                break;
+                            }
+                            SampleRows.Add(new List<string> { TrimQuoteDelimeters(row) });
+                            j++;
+                        }
+                    }
+                    reader.Close();
+                }
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+            }
+        }
+
+        private void InitializeColumnProperties()
+        {
+            if (!IsFixedWidth)
+            {
+                for (var x = 0; x < Columns.Count; x++)
+                {
+                    var column = Columns[x];
+                    for (var e = FirstDataRowIndex; e < SampleRows.Count; e++)
+                    {
+                        var row = SampleRows[e];
+                        var value = TrimQuoteDelimeters(row[column.Index]);
+                        if (string.IsNullOrEmpty(column.ExampleValue))
+                        {
+                            column.ExampleValue = value;
+                        }
+                        if (value.Length <= column.Length) continue;
+                        column.Length = value.Length;
+                    }
+                    Columns[x] = column;
+                }
             }
         }
 
@@ -243,171 +383,32 @@ namespace Fable
             NameWithoutExtension = Path.GetFileNameWithoutExtension(FullName);
             Extension = sourceFile.Extension;
             var extension = Extension.ToLower().Replace(".", "");
-            StreamReader reader = null;
-            _excelConnection = CreateExcelConnection(HasColumnHeaders);
-
             try
             {
                 switch (extension)
                 {
                     case "xls":
                     case "xlsx":
-                    {
-                        Format = Format.Excel;
-                        _excelConnection.Open();
-                        var sheets = _excelConnection.GetOleDbSchemaTable(OleDbSchemaGuid.Tables, null);
-                        ExcelSheets = new List<string>();
-                        if (sheets != null)
-                        {
-                            // Add the sheet name to the string array.
-                            foreach (DataRow row in sheets.Rows)
-                            {
-                                var sheet = row["TABLE_NAME"].ToString();
-                                if (sheet.Contains("$"))
-                                {
-                                    ExcelSheets.Add(row["TABLE_NAME"].ToString());
-                                }
-                            }
-                        }
-                        _excelConnection.Close();
-                        if (ExcelSheets.Any())
-                        {
-                            SwitchToWorkSheet(0);
-                        }
-                    }
+                        Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
+                        InitializeExcelFile();
                         break;
                     default:
-                        reader = File.OpenText(sourceFile.FullName);
-                        var firstLine = reader.ReadLine();
-                        if (firstLine != null)
-                        {
-                            if (Extension.ToLower() == ".csv") // trust the extension
-                            {
-                                FieldDelimeter = ",";
-                                SetFormatBasedOnDelimeter();
-                            }
-                            else
-                            {
-                                var delimeters = new[] {"\t", ",", "|", SpecialFieldDelimeter};
-                                foreach (var delimeter in delimeters)
-                                {
-                                    if (!firstLine.Contains(delimeter)) continue;
-                                    FieldDelimeter = delimeter;
-                                    SetFormatBasedOnDelimeter();
-                                    break;
-                                }
-                            }
-
-
-                            if (FieldDelimeter.Length > 0)
-                            {
-                                var j = 0;
-                                var columns = SplitByFormat(firstLine);
-                                if (HasColumnHeaders)
-                                {
-                                    for (var i = 0; i < columns.Length; i++)
-                                    {
-                                        Columns.Add(new Column(i, columns[i]));
-                                    }
-                                }
-                                else
-                                {
-                                    for (var i = 0; i < columns.Length; i++)
-                                    {
-                                        Columns.Add(new Column(i, DefaultColumnName + (i + 1)));
-                                    }
-                                    SampleRows.Add(columns.ToList());
-                                    j++;
-                                }
-                                while (j < NumberOfExampleRows)
-                                {
-                                    var row = reader.ReadLine();
-                                    if (row == null)
-                                    {
-                                        break;
-                                    }
-                                    var fieldItems = SplitByFormat(row).ToList();
-                                    for (var x = 0; x < fieldItems.Count; x++)
-                                    {
-                                        fieldItems[x] = fieldItems[x].Trim();
-                                    }
-                                    SampleRows.Add(fieldItems);
-                                    j++;
-                                }
-                            }
-                            else
-                            {
-                                var j = 0;
-                                HasColumnHeaders = Layout != null && Layout.Columns.Count > 0;
-                                if (HasColumnHeaders)
-                                {
-                                    var columnLine = firstLine.ToLower();
-                                    foreach (var column in Columns)
-                                    {
-                                        if (columnLine.Substring(column.Start, column.Length).Trim() ==
-                                            column.Name.ToLower()) continue;
-                                        HasColumnHeaders = false;
-                                        break;
-                                    }
-                                }
-                                else
-                                {
-                                    Columns.Add(new Column(0, DefaultColumnName + 1));
-                                    SampleRows.Add(new List<string> {TrimQuoteDelimeters(firstLine)});
-                                    j++;
-                                }
-                                Format = Format.SpaceDelimited;
-                                while (j < NumberOfExampleRowsIfFixedWidth)
-                                {
-                                    var row = reader.ReadLine();
-                                    if (row == null)
-                                    {
-                                        break;
-                                    }
-                                    SampleRows.Add(new List<string> {TrimQuoteDelimeters(row)});
-                                    j++;
-                                }
-                            }
-                            reader.Close();
-                        }
+                        InitializeDelimitedFile();
                         break;
                 }
 
                 if (SampleRows.Count == 0)
                 {
-                    Validity.AddError("File is empty");
+                    Validity.AddWarning("File is empty");
                 }
-                foreach (var t in Columns)
+                foreach (var column in Columns.Where(column => column.Length == 0))
                 {
-                    var column = t;
-                    if (column.Length == 0)
-                    {
-                        t.Length = 1;
-                    }
+                    column.Length = 1;
                 }
                 FirstDataRowIndex = SampleRows.Count > 1 ? 1 : 0;
                 //Get Max Length of values in example rows
                 //Set Example Values
-
-                if (!IsFixedWidth)
-                {
-                    for (var x = 0; x < Columns.Count; x++)
-                    {
-                        var column = Columns[x];
-                        for (var e = FirstDataRowIndex; e < SampleRows.Count; e++)
-                        {
-                            var row = SampleRows[e];
-                            var value = TrimQuoteDelimeters(row[column.Index]);
-                            if (string.IsNullOrEmpty(column.ExampleValue))
-                            {
-                                column.ExampleValue = value;
-                            }
-                            if (value.Length <= column.Length) continue;
-                            column.Length = value.Length;
-                        }
-                        Columns[x] = column;
-                    }
-                }
+                InitializeColumnProperties();
                 if (OnInitialize != null)
                 {
                     OnInitialize();
@@ -418,34 +419,29 @@ namespace Fable
                 Validity.Errors.Clear();
                 Validity.AddError("Unexpected Error: " + ex.Message);
             }
-            finally
-            {
-                if (reader != null) reader.Close();
-                if (_excelConnection != null)
-                {
-                    _excelConnection.Close();
-                    _excelConnection.Dispose();
-                }
-            }
         }
+
+       
 
         private void SetFormatBasedOnDelimeter()
         {
-            if (FieldDelimeter == "\t")
+            switch (FieldDelimeter)
             {
-                Format = Format.TabDelimited;
-            }
-            else if (FieldDelimeter == ",")
-            {
-                Format = Format.CSV;
-            }
-            else if (FieldDelimeter == "|")
-            {
-                Format = Format.TabDelimited;
-            }
-            else if (FieldDelimeter == SpecialFieldDelimeter)
-            {
-                Format = Format.FileSessionImport;
+                case "\t":
+                    Format = Format.TabDelimited;
+                    break;
+                case ",":
+                    Format = Format.CommaDelimited;
+                    break;
+                case "|":
+                    Format = Format.PipeDelimited;
+                    break;
+                default:
+                    if (FieldDelimeter == SpecialFieldDelimeter)
+                    {
+                        Format = Format.FileSessionImport;
+                    }
+                    break;
             }
         }
 
@@ -457,26 +453,21 @@ namespace Fable
                 EvaluatedEntirely = true;
                 return;
             }
-            OleDbConnection conn = null;
+            IExcelDataReader excelReader = null;
             StreamReader reader = null;
             try
             {
                 switch (Format)
                 {
-                    case Format.Excel:
-
-                        conn = CreateExcelConnection(HasColumnHeaders);
-                        conn.Open();
-                        var commandText = "SELECT * FROM [" + ActiveWorksheet + "]";
-                        var cmd = new OleDbCommand(commandText, conn) {CommandType = CommandType.Text};
-
-                        var dr = cmd.ExecuteReader(CommandBehavior.Default);
-                        while (dr != null && dr.Read())
+                    case Format.XLS:
+                    case Format.XLSX:
+                        excelReader = GetExcelDataReader();
+                        while (excelReader.Read())
                         {
                             for (var x = 0; x < Columns.Count; x++)
                             {
                                 var column = Columns[x];
-                                var value = dr[column.Index].ToString();
+                                var value = excelReader[column.Index].ToString();
                                 if (value.Length > column.Length)
                                 {
                                     column.Length = value.Length;
@@ -531,10 +522,9 @@ namespace Fable
             {
                 if (reader != null) reader.Close();
 
-                if (conn != null)
+                if (excelReader != null)
                 {
-                    conn.Close();
-                    conn.Dispose();
+                    excelReader.Close();
                 }
             }
         }
@@ -547,8 +537,12 @@ namespace Fable
             }
         }
 
-        public List<ColumnValueFrequency> GetColumnValueFrequency(Column column, string whereClause = null)
+        public List<ColumnValueFrequency> GetColumnValueFrequency(Column column, QueryBuilder query = null)
         {
+            if (query == null)
+            {
+                query = new QueryBuilder(SqlFlavor.TransactSql);
+            }
             StartSqlSession();
             string sqlName;
             string alias;
@@ -562,7 +556,9 @@ namespace Fable
                 sqlName = column.Name;
                 alias = BracketWrap(column.Alias);
             }
-            var dtResults = GetDataTable(sqlName + " AS " + alias + ",count(*) as [Count]", whereClause, sqlName, null, "count(*) DESC");
+            query.Select(sqlName + " AS " + alias + ", COUNT(*) as [Count]")
+                .OrderBy("COUNT(*) DESC");
+            var dtResults = GetDataTable(query);
             var frequencyList = new List<ColumnValueFrequency>();
             foreach (DataRow row in dtResults.Rows)
             {
@@ -584,19 +580,10 @@ namespace Fable
             var forceRemovalOfQuotes = false;
             switch (Format)
             {
-                case Format.CSV:
-                    break;
-                case Format.TabDelimited:
-                    break;
                 case Format.SpaceDelimited:
-                    forceRemovalOfQuotes = true;
-                    break;
-                case Format.PipeDelimited:
-                    break;
                 case Format.FileSessionImport:
-                    forceRemovalOfQuotes = true;
-                    break;
-                case Format.Excel:
+                case Format.XLSX:
+                case Format.XLS:
                     forceRemovalOfQuotes = true;
                     break;
             }
@@ -629,7 +616,7 @@ namespace Fable
 
         protected string PlaceQuoteDelimetersIfNeeded(string value)
         {
-            if (Format == Format.SpaceDelimited || HasQuoteDelimeters(value)) return value;
+            if (Format == Format.SpaceDelimited || Format == Format.XLSX || Format == Format.XLS || HasQuoteDelimeters(value)) return value;
             return value.Contains(FieldDelimeter) ? "\"" + value + "\"" : value;
         }
 
@@ -644,7 +631,7 @@ namespace Fable
         {
             switch (Format)
             {
-                case Format.CSV:
+                case Format.CommaDelimited:
                     return ParseCsvRow(stringToSplit);
                 default:
                     return stringToSplit.Split(new[] {FieldDelimeter}, StringSplitOptions.None);
@@ -715,23 +702,23 @@ namespace Fable
             Save(Format, null, true, layout, mappings);
         }
 
-        public void ConvertTo(Format newLeadFileFormat, Layout layout = null, List<ColumnMapping> mappings = null)
+        public void ConvertTo(Format newFormat, Layout layout = null, List<ColumnMapping> mappings = null)
         {
-            Save(newLeadFileFormat, null, true, layout, mappings);
+            Save(newFormat, null, true, layout, mappings);
         }
 
-        public FableInfo SaveAs(Format newLeadFileFormat, string targetPath, bool overwrite = false, Layout layout = null, List<ColumnMapping> mappings = null)
+        public DataFileInfo SaveAs(Format newFormat, string targetPath, bool overwrite = false, Layout layout = null, List<ColumnMapping> mappings = null)
         {
-            Save(newLeadFileFormat, targetPath, overwrite, layout, mappings);
-            var newLfi = new FableInfo(targetPath, Layout);
+            Save(newFormat, targetPath, overwrite, layout, mappings);
+            var newLfi = new DataFileInfo(targetPath, Layout);
             newLfi.CopyPropertiesFromOtherDataFile(this);
             return newLfi;
         }
 
-        public FableInfo Copy(string targetPath, bool overwrite = false)
+        public DataFileInfo Copy(string targetPath, bool overwrite = false)
         {
             File.Copy(FullName, targetPath, overwrite);
-            var newLfi = new FableInfo(targetPath, Layout);
+            var newLfi = new DataFileInfo(targetPath, Layout);
             newLfi.CopyPropertiesFromOtherDataFile(this);
             return newLfi;
         }
@@ -741,12 +728,12 @@ namespace Fable
             return string.IsNullOrEmpty(line) || line.Replace(delimeter, "").Trim().Length == 0;
         }
 
-        public static Format GetLeadFormatByDelimeter(string delimeter)
+        public static Format GetFileFormatByDelimeter(string delimeter)
         {
             switch (delimeter)
             {
                 case ",":
-                    return Format.CSV;
+                    return Format.CommaDelimited;
                 case "\t":
                     return Format.TabDelimited;
                 case "":
@@ -757,12 +744,11 @@ namespace Fable
             return Format.Unknown;
         }
 
-        protected void Save(Format newLeadFileFormat, string newFilePath, bool overwrite, Layout newFixedWidthLayout, List<ColumnMapping> mappings)
+        protected void Save(Format newFormat, string newFilePath, bool overwrite, Layout newFixedWidthLayout, List<ColumnMapping> mappings)
         {
             var replacingCurrentFile = (newFilePath == null || newFilePath.ToLower().Trim() == FullName.ToLower().Trim());
-            OleDbConnection conn = null;
             StreamReader reader = null;
-            OleDbCommand cmd = null;
+            IExcelDataReader excelReader = null;
             if (IsFixedWidth)
             {
                 if (Layout == null)
@@ -775,9 +761,9 @@ namespace Fable
             var forceRemovalOfQuotes = false;
             const string tempExtension = ".temp";
             var eligibleForLayoutChange = mappings != null && mappings.Count > 0 && newFixedWidthLayout != null;
-            switch (newLeadFileFormat)
+            switch (newFormat)
             {
-                case Format.CSV:
+                case Format.CommaDelimited:
                     newDelimeter = ",";
                     newExtension = ".csv";
                     break;
@@ -788,7 +774,7 @@ namespace Fable
                     if (!eligibleForLayoutChange)
                     {
                         throw new Exception(
-                            "A lead Layout and field to field mappings are required to save as space delmited");
+                            "A lead Layout and field to field mappings are required to save as space delimited");
                     }
                     newDelimeter = "";
                     forceRemovalOfQuotes = true;
@@ -801,7 +787,8 @@ namespace Fable
                     forceRemovalOfQuotes = true;
                     newExtension = SqlImportFileExtension;
                     break;
-                case Format.Excel:
+                case Format.XLS:
+                case Format.XLSX:
                     throw new Exception("Converting to Excel is not supported at the moment. Please use another format");
             }
             if (replacingCurrentFile)
@@ -814,42 +801,31 @@ namespace Fable
             {
                 if (HasColumnHeaders)
                 {
-                    writer.WriteLine(eligibleForLayoutChange
-                        ? GetFileColumnString(newLeadFileFormat, Columns)
+                    writer.WriteLine(!eligibleForLayoutChange
+                        ? GetFileColumnString(newFormat, Columns)
                         // ReSharper disable once PossibleNullReferenceException
-                        : GetFileColumnString(newLeadFileFormat, newFixedWidthLayout.Columns));
+                        : GetFileColumnString(newFormat, newFixedWidthLayout.Columns));
                 }
                 string line;
                 if (!eligibleForLayoutChange)
                 {
                     switch (Format)
                     {
-                        case Format.Excel:
-                        {
-                            conn = CreateExcelConnection(HasColumnHeaders);
-                            conn.Open();
-                            var commandText = "SELECT * FROM [" + ActiveWorksheet + "]";
-                            cmd = new OleDbCommand(commandText, conn) {CommandType = CommandType.Text};
-
-                            var dr = cmd.ExecuteReader(CommandBehavior.Default);
-
-                            if (dr != null)
+                        case Format.XLSX:
+                        case Format.XLS:
+                            excelReader = GetExcelDataReader();
+                            while (excelReader.Read())
                             {
-                                while (dr.Read())
+                                var row = new List<string>();
+                                for (var y = 0; y < Columns.Count; y++)
                                 {
-                                    var row = new List<string>();
-                                    for (var y = 0; y < Columns.Count; y++)
-                                    {
-                                        var field = dr[y];
-                                        row.Add(ModifyValueBasedOnSettings(field.ToString(), newLeadFileFormat, forceRemovalOfQuotes));
-                                    }
-                                    var rowString = string.Join(newDelimeter, row);
-                                    if (!LineIsEmpty(rowString, newDelimeter))
-                                        writer.WriteLine(rowString);
+                                    var field = Convert.ToString(excelReader[y]);
+                                    row.Add(ModifyValueBasedOnSettings(field, newFormat, forceRemovalOfQuotes));
                                 }
-                                dr.Close();
+                                var rowString = string.Join(newDelimeter, row);
+                                if (!LineIsEmpty(rowString, newDelimeter))
+                                    writer.WriteLine(rowString);
                             }
-                        }
                             break;
                         case Format.SpaceDelimited:
                             reader = File.OpenText(FullName);
@@ -867,7 +843,7 @@ namespace Fable
                                     foreach (var column in Columns)
                                     {
                                         var value = Substr(line, column.Start, column.Length);
-                                        value = ModifyValueBasedOnSettings(value, newLeadFileFormat, forceRemovalOfQuotes);
+                                        value = ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes);
                                         row.Add(value);
                                     }
                                     var rowString = string.Join(newDelimeter, row);
@@ -893,7 +869,7 @@ namespace Fable
                                     var row = new List<string>();
                                     foreach (var value in fields)
                                     {
-                                        row.Add(ModifyValueBasedOnSettings(value, newLeadFileFormat, forceRemovalOfQuotes));
+                                        row.Add(ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes));
                                     }
                                     var rowString = string.Join(newDelimeter, row);
                                     if (!LineIsEmpty(rowString, newDelimeter))
@@ -908,19 +884,14 @@ namespace Fable
                 {
                     switch (Format)
                     {
-                        case Format.Excel:
-                            conn = CreateExcelConnection(HasColumnHeaders);
-                            conn.Open();
-                            var commandText = "SELECT * FROM [" + ActiveWorksheet + "]";
-                            cmd = new OleDbCommand(commandText, conn) {CommandType = CommandType.Text};
-
-                            var dr = cmd.ExecuteReader(CommandBehavior.Default);
-
-                            if (dr != null)
+                        case Format.XLS:
+                        case Format.XLSX:
+                            excelReader = GetExcelDataReader();
+                            if (excelReader != null)
                             {
-                                if (newLeadFileFormat != Format.SpaceDelimited)
+                                if (newFormat != Format.SpaceDelimited)
                                 {
-                                    while (dr.Read())
+                                    while (excelReader.Read())
                                     {
                                         var row = new List<string>();
                                         foreach (var targetColumn in newFixedWidthLayout.Columns)
@@ -931,8 +902,8 @@ namespace Fable
                                                 if (mapping.TargetFieldIndex != targetColumn.Index) continue;
                                                 if (Columns.Count > mapping.SourceFieldIndex)
                                                 {
-                                                    var value = dr[mapping.SourceFieldIndex].ToString();
-                                                    row.Add(ModifyValueBasedOnSettings(value, newLeadFileFormat, forceRemovalOfQuotes));
+                                                    var value = excelReader[mapping.SourceFieldIndex].ToString();
+                                                    row.Add(ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes));
                                                     row.Add(value);
                                                     foundMap = true;
                                                 }
@@ -950,7 +921,7 @@ namespace Fable
                                 }
                                 else
                                 {
-                                    while (dr.Read())
+                                    while (excelReader.Read())
                                     {
                                         var row = new List<string>();
                                         foreach (var targetColumn in newFixedWidthLayout.Columns)
@@ -961,7 +932,7 @@ namespace Fable
                                                 if (mapping.TargetFieldIndex != targetColumn.Index) continue;
                                                 if (Columns.Count > mapping.SourceFieldIndex)
                                                 {
-                                                    var value = dr[mapping.SourceFieldIndex].ToString();
+                                                    var value = excelReader[mapping.SourceFieldIndex].ToString();
                                                     row.Add(ModifyValueBasedOnColumnLength(targetColumn, value));
                                                     foundMap = true;
                                                 }
@@ -977,8 +948,7 @@ namespace Fable
                                             writer.WriteLine(rowString);
                                     }
                                 }
-
-                                dr.Close();
+                                excelReader.Close();
                             }
                             break;
                         case Format.SpaceDelimited:
@@ -991,7 +961,7 @@ namespace Fable
 
                             if (line != null)
                             {
-                                if (newLeadFileFormat != Format.SpaceDelimited)
+                                if (newFormat != Format.SpaceDelimited)
                                 {
                                     while (line != null)
                                     {
@@ -1006,7 +976,7 @@ namespace Fable
                                                 {
                                                     var sourceColumn = Columns[mapping.SourceFieldIndex];
                                                     var value = Substr(line, sourceColumn.Start, sourceColumn.Length);
-                                                    value = ModifyValueBasedOnSettings(value, newLeadFileFormat, forceRemovalOfQuotes);
+                                                    value = ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes);
                                                     row.Add(value);
                                                     foundMap = true;
                                                 }
@@ -1068,7 +1038,7 @@ namespace Fable
 
                             if (line != null)
                             {
-                                if (newLeadFileFormat != Format.SpaceDelimited)
+                                if (newFormat != Format.SpaceDelimited)
                                 {
                                     while (line != null)
                                     {
@@ -1083,7 +1053,7 @@ namespace Fable
                                                 if (fields.Length > mapping.SourceFieldIndex)
                                                 {
                                                     var value = fields[mapping.SourceFieldIndex];
-                                                    value = ModifyValueBasedOnSettings(value, newLeadFileFormat, forceRemovalOfQuotes);
+                                                    value = ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes);
                                                     row.Add(value);
                                                     foundMap = true;
                                                 }
@@ -1140,12 +1110,10 @@ namespace Fable
                 writer.Close();
                 if (reader != null) reader.Close();
 
-                if (conn != null)
+                if (excelReader != null)
                 {
-                    conn.Close();
-                    conn.Dispose();
+                    excelReader.Close();
                 }
-                if (cmd != null) cmd.Dispose();
                 var finalPath = newFilePath.Replace(tempExtension, "").Replace(Extension, newExtension);
                 if (overwrite)
                 {
@@ -1160,7 +1128,7 @@ namespace Fable
                 File.Move(newFilePath, finalPath);
                 FullName = finalPath;
                 FieldDelimeter = newDelimeter;
-                Format = newLeadFileFormat;
+                Format = newFormat;
                 Extension = newExtension;
                 var fi = new FileInfo(FullName);
                 Name = fi.Name;
@@ -1177,12 +1145,11 @@ namespace Fable
                 writer.Close();
                 if (reader != null) reader.Close();
 
-                if (conn != null)
+                if (excelReader != null)
                 {
-                    conn.Close();
-                    conn.Dispose();
+                    excelReader.Close();
+                    excelReader.Dispose();
                 }
-                if (cmd != null) cmd.Dispose();
             }
         }
 
@@ -1191,54 +1158,39 @@ namespace Fable
             QueryToFile(FullName, HasColumnHeaders);
         }
 
-        public FableInfo QueryToFile(string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public DataFileInfo QueryToFile(QueryBuilder query = null, string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return QueryToFile(null, HasColumnHeaders, null, whereClause, groupByClause,
-                havingClause, orderByClause,
-                newDelimeter, grouplessRecordsOnly, groupId);
+            return QueryToFile(null, HasColumnHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public FableInfo QueryToFile(bool withHeaders, string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null,
+        public DataFileInfo QueryToFile(bool withHeaders, QueryBuilder query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return QueryToFile(null, withHeaders, null, whereClause, groupByClause,
-                havingClause, orderByClause,
-                newDelimeter, grouplessRecordsOnly, groupId);
+            return QueryToFile(null, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public FableInfo QueryToFile(string targetFilePath, bool withHeaders, string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null,
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, QueryBuilder query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return QueryToFile(targetFilePath, withHeaders, null, whereClause, groupByClause,
-                havingClause, orderByClause,
-                newDelimeter, grouplessRecordsOnly, groupId);
+            return QueryToFile(targetFilePath, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public FableInfo QueryToFile(bool withHeaders, IEnumerable<Column> columns, string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null,
+        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<Column> columns, QueryBuilder query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return QueryToFile(null, withHeaders, columns, whereClause, groupByClause,
-                havingClause, orderByClause,
-                newDelimeter, grouplessRecordsOnly, groupId);
+            return QueryToFile(null, withHeaders, columns, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public FableInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<Column> columns, string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null,
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<Column> columns, QueryBuilder query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             var exportIsFixedWidth = newDelimeter != null && newDelimeter == string.Empty || IsFixedWidth;
             var overwritingCurrentFile = string.IsNullOrWhiteSpace(targetFilePath) || IsSamePath(FullName, targetFilePath);
             StartSqlSession();
-            SqlQueryToFile(GetSqlColumnString(columns ?? Columns, exportIsFixedWidth), whereClause, groupByClause,
-                havingClause, orderByClause, targetFilePath,
+            SqlQueryToFile(GetSqlColumnString(columns ?? Columns, exportIsFixedWidth), query, targetFilePath,
                 newDelimeter, grouplessRecordsOnly, groupId);
 
-            var dataFileInfo = overwritingCurrentFile ? this : new FableInfo(targetFilePath, false);
+            var dataFileInfo = overwritingCurrentFile ? this : new DataFileInfo(targetFilePath, false);
             if (withHeaders)
             {
                 dataFileInfo.InsertColumnHeaders();
@@ -1312,36 +1264,41 @@ namespace Fable
             }
         }
 
-        public int ImportIntoTable(string targetServer, string targetDb, string targetTable, ColumnList columns = null, string whereClause = null, string groupByClause = null,
-            string havingClause = null, string orderByClause = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public void ImportIntoTable(string targetConnectionString, string targetTable, ColumnList columns = null, QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             StartSqlSession();
-            return SqlQueryToTable(targetServer, targetDb, targetTable, groupId, GetSqlColumnString(columns ?? Columns), whereClause, groupByClause,
-                havingClause, orderByClause, grouplessRecordsOnly);
+            if (query == null)
+            {
+                query = new QueryBuilder(SqlFlavor.TransactSql);
+            }
+            query.Select(GetSqlColumnString(columns ?? Columns));
+            SqlQueryToTable(targetConnectionString, targetTable, query, grouplessRecordsOnly, groupId);
         }
 
-        public int UpdateRecords(string updateClause = null, string whereClause = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public int UpdateRecords(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             StartSqlSession();
-            var recordsUpdated = SqlUpdate(groupId, updateClause, whereClause, grouplessRecordsOnly);
+            var recordsUpdated = SqlUpdate(groupId, query, grouplessRecordsOnly);
             UpdatePhysicalFileFromSql();
             return recordsUpdated;
         }
 
-        public int DeleteRecords(string whereClause = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public int DeleteRecords(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             StartSqlSession();
-            var recordsDeleted = SqlDelete(groupId, whereClause, grouplessRecordsOnly);
+            var recordsDeleted = SqlDelete(groupId, query, grouplessRecordsOnly);
             UpdatePhysicalFileFromSql();
             return recordsDeleted;
         }
 
         public void Shuffle()
         {
-            QueryToFile(null, null, null, null, "NEWID()");
+            var query = new QueryBuilder(SqlFlavor.TransactSql);
+            query.OrderBy("NEWID()");
+            QueryToFile(query);
         }
 
-        public void CopyPropertiesFromOtherDataFile(FableInfo source)
+        public void CopyPropertiesFromOtherDataFile(DataFileInfo source)
         {
             HasColumnHeaders = source.HasColumnHeaders;
             AggregatableColumns = source.AggregatableColumns;
@@ -1419,21 +1376,21 @@ namespace Fable
                 maxSplits, newDirectory);
         }
 
-        public List<FileSummary> SplitByFileQuery(string whereClause, bool randomize, string newDirectory)
+        public List<FileSummary> SplitByFileQuery(QueryBuilder query, bool randomize, string newDirectory)
         {
-            return Split(SplitMethod.ByFileQuery, whereClause, null, randomize,
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 null, newDirectory);
         }
 
-        public List<FileSummary> SplitByFileQuery(string whereClause, bool randomize)
+        public List<FileSummary> SplitByFileQuery(QueryBuilder query, bool randomize)
         {
-            return Split(SplitMethod.ByFileQuery, whereClause, null, randomize,
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 null, null);
         }
 
-        public List<FileSummary> SplitByFileQuery(string whereClause, int maxSplits = 0, bool randomize = false, string newDirectory = null)
+        public List<FileSummary> SplitByFileQuery(QueryBuilder query, int maxSplits = 0, bool randomize = false, string newDirectory = null)
         {
-            return Split(SplitMethod.ByFileQuery, whereClause, null, randomize,
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 maxSplits, newDirectory);
         }
 
@@ -1488,7 +1445,7 @@ namespace Fable
         {
             var file = string.IsNullOrEmpty(filePath)
                 ? this
-                : !IsFixedWidth ? new FableInfo(filePath, HasColumnHeaders) : new FableInfo(filePath, Layout);
+                : !IsFixedWidth ? new DataFileInfo(filePath, HasColumnHeaders) : new DataFileInfo(filePath, Layout);
             if (!string.IsNullOrEmpty(newDirectory))
             {
                 var newdir = new DirectoryInfo(newDirectory);
@@ -1501,6 +1458,7 @@ namespace Fable
                     newDirectory += @"\";
                 }
             }
+            var query = new QueryBuilder(SqlFlavor.TransactSql);
             var fileList = new List<string>();
             const string partSuffix = "_Part";
             const string incrementPlaceHolder = "[increment]";
@@ -1536,7 +1494,8 @@ namespace Fable
                             reader.ReadLine(); //Skip columns
                         }
                         reader.Close();
-                        var counts = file.GetDataTable(sqlColString, null, columnsWithoutAliases, null, "COUNT(*)");
+                        query.Select(sqlColString).GroupBy(columnsWithoutAliases).OrderBy("COUNT(*)");
+                        var counts = file.GetDataTable(query);
                         for (var x = 0; x < counts.Columns.Count; x++)
                         {
                             var column = counts.Columns[x];
@@ -1559,8 +1518,12 @@ namespace Fable
                                 }
                             }
 
-                            dr = file.GetDataReader(file.GetSqlColumnString(), where, null, null,
-                                randomize ? randomizer : null);
+                            query.Select(file.GetSqlColumnString()).Where(where);
+                            if (randomize)
+                            {
+                                query.OrderBy(randomizer);
+                            }
+                            dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1604,8 +1567,12 @@ namespace Fable
                             reader.ReadLine(); //Skip columns
                         }
                         reader.Close();
-                        dr = file.GetDataReader(file.GetSqlColumnString(), whereClause, null, null,
-                            randomize ? randomizer : null, true, Guid.NewGuid().ToString("N"));
+                        query.Select(file.GetSqlColumnString()).Where(whereClause);
+                        if (randomize)
+                        {
+                            query.OrderBy(randomizer);
+                        }
+                        dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
                         while (dr.Read())
                         {
                             var rowString = "";
@@ -1623,8 +1590,12 @@ namespace Fable
                         writer.Flush();
                         writer.Close();
 
-                        dr = file.GetDataReader(file.GetSqlColumnString(), null, null, null,
-                            randomize ? randomizer : null, true, Guid.NewGuid().ToString("N"));
+                        query.Select(file.GetSqlColumnString());
+                        if (randomize)
+                        {
+                            query.OrderBy(randomizer);
+                        }
+                        dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
 
                         if (dr.Read())
                         {
@@ -1673,8 +1644,9 @@ namespace Fable
                         {
                             reader.Close();
                             file.StartSqlSession();
-                            dr = file.GetDataReader(file.GetSqlColumnString(), null, null, null,
-                                randomizer);
+                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            
+                            dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1765,8 +1737,8 @@ namespace Fable
                         {
                             reader.Close();
                             file.StartSqlSession();
-                            dr = file.GetDataReader(file.GetSqlColumnString(), null, null, null,
-                                randomizer);
+                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1835,7 +1807,8 @@ namespace Fable
                         sqlColString = file.GetSqlColumnString() + ",NTILE(" + fileSplits + ") OVER(PARTITION BY " +
                                        partitionField + " ORDER BY " +
                                        (randomize ? randomizer : "iFileSessionRecordId") + " DESC) AS FileGroup";
-                        dr = file.GetDataReader(sqlColString, null, null, null, "FileGroup");
+                        query.Select(sqlColString).GroupBy("FileGroup");
+                        dr = file.GetDataReader(query);
                         var fileGroupColumnIndex = file.Columns.Count;
                         var currGroup = "";
                         while (dr.Read())
@@ -1891,8 +1864,8 @@ namespace Fable
                             file.StartSqlSession();
                             calculatedMaxRecords =
                                 Convert.ToInt32(Math.Round((double) file.TotalRecords/totalParts));
-                            dr = file.GetDataReader(file.GetSqlColumnString(), null, null, null,
-                                randomizer);
+                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -2060,7 +2033,7 @@ namespace Fable
             var delimeter = "";
             switch (format)
             {
-                case Format.CSV:
+                case Format.CommaDelimited:
                     delimeter = ",";
                     break;
                 case Format.TabDelimited:
@@ -2287,8 +2260,16 @@ namespace Fable
 
         #region SqlSession
 
-        public static string SqlProcedureFilesPath;
-        public static string SqlImportFilesDropPath;
+        private static FileInfo currentDll = new FileInfo(Assembly.GetExecutingAssembly().Location);
+        private static string SqlProcedureFilesPath
+        {
+            get
+            {
+                var path = Path.Combine(currentDll.DirectoryName, @"SqlSessionProcedures\SqlServer");
+                return path;
+            }
+        }
+        public static string SqlImportFilesDropPath = @"C:\importFiles";
         public static readonly string SpecialFieldDelimeter = "<#fin#>";
         public static readonly string SqlImportFileExtension = ".fsimport";
         public static readonly string SqlRecordIdColumnName = "___RecordId";
@@ -2304,14 +2285,15 @@ namespace Fable
             {
                 throw new ArgumentException("The SqlConnectionString must be set in order to use this operation");
             }
-            if (Format == Format.Excel)
+            if (Format == Format.XLSX || Format == Format.XLS)
             {
-                ConvertTo(Format.CSV);
+                ConvertTo(Format.CommaDelimited);
             }
+            ConnectionStringBuilder = new SqlConnectionStringBuilder(ConnectionString);
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\ImportFile.sql");
+                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "ImportFile.sql");
                 var sqlText = File.ReadAllText(sqlFilePath);
                 var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
                 if (!EvaluatedEntirely)
@@ -2319,11 +2301,10 @@ namespace Fable
                     EvaluateEntirely();
                 }
 
-                var localImportFilePath = Path.Combine(SqlImportFilesDropPath, @"/" + UniqueIdentifier + SqlImportFileExtension);
+                var localImportFilePath = Path.Combine(SqlImportFilesDropPath, UniqueIdentifier + SqlImportFileExtension);
 
                 //Create Temporary Import File
-                var importFile = !IsFixedWidth ? SaveAs(Format.FileSessionImport, localImportFilePath) : Copy(localImportFilePath);
-
+                var importFile = IsFixedWidth ? SaveAs(Format.FileSessionImport, localImportFilePath) : Copy(localImportFilePath);
 
                 cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
                 cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
@@ -2331,13 +2312,21 @@ namespace Fable
                 cmd.Parameters.AddWithValue("@columnsInFile", GetColumnDeclarationStatement(Columns));
                 cmd.Parameters.AddWithValue("@fileHasColumnsNames", importFile.HasColumnHeaders);
                 cmd.Parameters.AddWithValue("@fieldDelimiter", importFile.FieldDelimeter);
+                var formatFilePathParameter = new SqlParameter
+                {
+                    ParameterName = "@formatFilePath",
+                    SqlDbType = SqlDbType.VarChar,
+                    Size = 260,
+                    Value = DBNull.Value
+                };
+                cmd.Parameters.Add(formatFilePathParameter);
                 FileInfo formatFile = null;
                 if (importFile.IsFixedWidth)
                 {
-                    var formatFilePath = Path.Combine(SqlImportFilesDropPath, @"/" + UniqueIdentifier + ".xml");
-                    CreateFormatFile(formatFilePath);
+                    var formatFilePath = Path.Combine(SqlImportFilesDropPath, UniqueIdentifier + ".xml");
+                    CreateBcpFormatFile(formatFilePath);
                     formatFile = new FileInfo(formatFilePath);
-                    cmd.Parameters.AddWithValue("@formatFilePath", formatFilePath);
+                    formatFilePathParameter.Value = formatFilePath;
                 }
                 cn.Open();
                 cmd.ExecuteNonQuery();
@@ -2368,52 +2357,44 @@ namespace Fable
             SqlSessionActive = false;
         }
 
-        private SqlDataReader GetDataReader(string columns, string whereClause, string groupByClause,
-            string havingClause, string orderByClause, bool grouplessRecordsOnly = false, string groupId = null)
+        private SqlDataReader GetDataReader(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return (SqlDataReader) SqlSelect(true, columns, whereClause, groupByClause, havingClause, orderByClause,
-                grouplessRecordsOnly, groupId);
+            return (SqlDataReader) SqlSelect(true, query, grouplessRecordsOnly, groupId);
         }
 
-        private DataTable GetDataTable(string columns, string whereClause, string groupByClause,
-            string havingClause, string orderByClause, bool grouplessRecordsOnly = false, string groupId = null)
+        private DataTable GetDataTable(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
-            return (DataTable) SqlSelect(false, columns, whereClause, groupByClause, havingClause, orderByClause,
-                grouplessRecordsOnly, groupId);
+            return (DataTable) SqlSelect(false, query, grouplessRecordsOnly, groupId);
         }
 
-        private object SqlSelect(bool dataReader, string columnsCsv, string whereClause, string groupByClause,
-            string havingClause, string orderByClause, bool grouplessRecordsOnly = false, string groupId = null)
+        private object SqlSelect(bool dataReader, QueryBuilder query, bool grouplessRecordsOnly = false, string groupId = null)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\Select.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@columns", columnsCsv);
-                cmd.Parameters.AddWithValue("@whereClause", whereClause);
-                cmd.Parameters.AddWithValue("@groupByClause", groupByClause);
-                cmd.Parameters.AddWithValue("@havingClause", havingClause);
-                cmd.Parameters.AddWithValue("@orderByClause", orderByClause);
-                cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
-
+                CreateGroupPartition(groupId, grouplessRecordsOnly, query);
                 cn.Open();
-                if (dataReader)
+                var selectQuery = query.Clone();
+                if (groupId != null)
                 {
-                    return cmd.ExecuteReader(CommandBehavior.CloseConnection);
+                    selectQuery.ClearWhereClause().Where("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
                 }
-                else
+                selectQuery.From(BracketWrap(UniqueIdentifier));
+                using (var command = new SqlCommand(selectQuery.ToString(), cn) { CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout })
                 {
-                    var da = new SqlDataAdapter(cmd);
-                    var dt = new DataTable("QueryResults");
-                    da.Fill(dt);
-                    cn.Close();
-                    cn.Dispose();
-                    return dt;
+                    if (dataReader)
+                    {
+                        return command.ExecuteReader(CommandBehavior.CloseConnection);
+                    }
+                    else
+                    {
+                        var da = new SqlDataAdapter(command);
+                        var dt = new DataTable("QueryResults");
+                        da.Fill(dt);
+                        cn.Close();
+                        cn.Dispose();
+                        return dt;
+                    }
                 }
             }
             catch
@@ -2430,25 +2411,66 @@ namespace Fable
             }
         }
 
-        protected DataTable GetSqlSchema(string columns)
+        private void CreateGroupPartition(string groupId, bool grouplessRecordsOnly = false, QueryBuilder query = null)
+        {
+            if (string.IsNullOrWhiteSpace(groupId)) return;
+            var cn = new SqlConnection(ConnectionString);
+            if (query == null)
+            {
+                query = new QueryBuilder(SqlFlavor.TransactSql);
+            }
+            try
+            {
+                var releaseGroupQuery = new QueryBuilder(SqlFlavor.TransactSql)
+                    .Update(BracketWrap(UniqueIdentifier))
+                    .Set("{0} = NULL", SqlRecordGroupColumnName)
+                    .Where("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
+                using (var command = new SqlCommand(releaseGroupQuery.ToString(), cn))
+                {
+                    command.ExecuteNonQuery();
+                }
+
+                var assignGroupQuery =  query
+                    .Clone()
+                    .Update(BracketWrap(UniqueIdentifier))
+                    .Set("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
+
+                if (grouplessRecordsOnly)
+                {
+                    assignGroupQuery.Where("{0} IS NULL", SqlRecordGroupColumnName);
+                }
+
+                using (var command = new SqlCommand(assignGroupQuery.ToString(), cn))
+                {
+                    command.ExecuteNonQuery();
+                }
+            }
+            finally
+            {
+                cn.Close();
+            }
+            
+        }
+
+        protected DataTable GetSqlSchema(QueryBuilder query)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\GetSchema.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@columns", columns);
-
                 cn.Open();
-                var da = new SqlDataAdapter(cmd);
-                var dt = new DataTable("Schema");
-                da.FillSchema(dt, SchemaType.Source);
-                cn.Close();
-                cn.Dispose();
-                return dt;
+                var schemaTable = new DataTable();
+                var schemaQuery = new QueryBuilder(query.Flavor);
+                schemaQuery
+                    .Select(query.SelectClause)
+                    .Limit(1)
+                    .From(WrapWithBrackets(UniqueIdentifier))
+                    .Where("1 = 2");
+                using (var command = new SqlCommand(schemaQuery.ToString(), cn))
+                {
+                    var da = new SqlDataAdapter(command);
+                    da.FillSchema(schemaTable, SchemaType.Source);
+                }
+                return schemaTable;
             }
             finally
             {
@@ -2456,19 +2478,19 @@ namespace Fable
             }
         }
 
-        private int SqlUpdate(string groupId, string updateClause, string whereClause, bool grouplessRecordsOnly)
+        private int SqlUpdate(string groupId, QueryBuilder query, bool grouplessRecordsOnly)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\Update.sql");
+                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "Update.sql");
                 var sqlText = File.ReadAllText(sqlFilePath);
                 var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
                 cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
                 cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
                 cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@updateClause", updateClause);
-                cmd.Parameters.AddWithValue("@whereClause", whereClause);
+                cmd.Parameters.AddWithValue("@updateClause", query.SetClause);
+                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
                 cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
 
                 cn.Open();
@@ -2485,7 +2507,7 @@ namespace Fable
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\AlterTable.sql");
+                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "AlterTable.sql");
                 var sqlText = File.ReadAllText(sqlFilePath);
                 var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
                 cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
@@ -2500,18 +2522,18 @@ namespace Fable
             }
         }
 
-        private int SqlDelete(string groupId, string whereClause, bool grouplessRecordsOnly)
+        private int SqlDelete(string groupId, QueryBuilder query, bool grouplessRecordsOnly)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\Delete.sql");
+                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "Delete.sql");
                 var sqlText = File.ReadAllText(sqlFilePath);
                 var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
                 cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
                 cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
                 cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@whereClause", whereClause);
+                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
                 cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
 
                 cn.Open();
@@ -2523,8 +2545,7 @@ namespace Fable
             }
         }
 
-        private void SqlQueryToFile(string columns, string whereClause, string groupByClause,
-            string havingClause, string orderByClause, string targetFilePath,
+        private void SqlQueryToFile(string columns, QueryBuilder query, string targetFilePath,
             string newDelimeter, bool grouplessRecordsOnly, string groupId)
         {
             var cn = new SqlConnection(ConnectionString);
@@ -2532,7 +2553,7 @@ namespace Fable
             {
                 var targetFile = new FileInfo(targetFilePath);
                 var delimeter = newDelimeter ?? FieldDelimeter;
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\QueryToFile.sql");
+                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "QueryToFile.sql");
                 var sqlText = File.ReadAllText(sqlFilePath);
                 var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = 0};
                 cmd.CommandTimeout = SqlCommandTimeout;
@@ -2540,10 +2561,10 @@ namespace Fable
                 cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
                 cmd.Parameters.AddWithValue("@groupId", groupId);
                 cmd.Parameters.AddWithValue("@columns", columns);
-                cmd.Parameters.AddWithValue("@whereClause", whereClause);
-                cmd.Parameters.AddWithValue("@groupByClause", groupByClause);
-                cmd.Parameters.AddWithValue("@havingClause", havingClause);
-                cmd.Parameters.AddWithValue("@orderByClause", orderByClause);
+                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
+                cmd.Parameters.AddWithValue("@groupByClause", query.GroupByClause);
+                cmd.Parameters.AddWithValue("@havingClause", query.HavingClause);
+                cmd.Parameters.AddWithValue("@orderByClause", query.OrderByClause);
                 cmd.Parameters.AddWithValue("@targetFilePath", targetFilePath);
                 cmd.Parameters.AddWithValue("@fieldDelimiter", delimeter);
                 cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
@@ -2570,35 +2591,52 @@ namespace Fable
             }
         }
 
-        private int SqlQueryToTable(string targetServer, string targetDb, string targetTable, string groupId, string columns, string whereClause, string groupByClause,
-            string havingClause, string orderByClause, bool grouplessRecordsOnly)
+        private void SqlQueryToTable(string targetConnectionString, string targetTable, QueryBuilder query, bool grouplessRecordsOnly, string groupId = null)
         {
-            var cn = new SqlConnection(ConnectionString);
+            var sourceTableConnection = new SqlConnection(ConnectionString);
+            var targetTableConnection = new SqlConnection(targetConnectionString ?? ConnectionString);
             try
             {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, @"\QueryToTable.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = 0};
-                cmd.CommandTimeout = SqlCommandTimeout;
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@columns", columns);
-                cmd.Parameters.AddWithValue("@whereClause", whereClause);
-                cmd.Parameters.AddWithValue("@groupByClause", groupByClause);
-                cmd.Parameters.AddWithValue("@havingClause", havingClause);
-                cmd.Parameters.AddWithValue("@orderByClause", orderByClause);
-                cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
-                cmd.Parameters.AddWithValue("@targetServer", targetServer);
-                cmd.Parameters.AddWithValue("@targetDB ", targetDb);
-                cmd.Parameters.AddWithValue("@targetTable", targetTable);
-                cn.Open();
-                return cmd.ExecuteNonQuery();
+                targetTableConnection.Open();
+                bool tableExists;
+                const string sql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = @TableId";
+                using (var command = new SqlCommand(sql, targetTableConnection))
+                {
+                    command.Parameters.AddWithValue("@TableId", targetTable);
+                    var count = Convert.ToInt32(command.ExecuteScalar());
+                    tableExists = count > 0;
+                }
+
+                if (!tableExists)
+                {
+                    sourceTableConnection.Open();
+                    var sourceTableSchema = new DataTable();
+                    var schemaQuery = new QueryBuilder(query.Flavor);
+                    schemaQuery
+                        .Select(query.SelectClause)
+                        .Limit(1)
+                        .From(WrapWithBrackets(UniqueIdentifier))
+                        .Where("1 = 2");
+                    using (var command = new SqlCommand(schemaQuery.ToString(), sourceTableConnection))
+                    {
+                        var da = new SqlDataAdapter(command);
+                        da.FillSchema(sourceTableSchema, SchemaType.Source);
+                    }
+
+                    var tableCreator = new TransactSqlTableCreator(targetTableConnection) { DestinationTableName = targetTable };
+                    tableCreator.CreateFromDataTable(sourceTableSchema);
+                }
+
+                using (var bulkCopy = new SqlBulkCopy(targetTableConnection))
+                {
+                    bulkCopy.DestinationTableName = "[" + targetTable + "]";
+                    bulkCopy.WriteToServer(GetDataReader(query,grouplessRecordsOnly,groupId));
+                }
             }
             finally
             {
-                cn.Close();
-                cn.Dispose();
+                sourceTableConnection.Close();
+                targetTableConnection.Close();
             }
         }
 
@@ -2608,12 +2646,12 @@ namespace Fable
             foreach (var column in columns)
             {
                 var length = column.Length > 0 ? column.Length : 1;
-                columnsCreateStatement.Add(WrapWithBrackets(column.Name) + " char(" + length + ")");
+                columnsCreateStatement.Add(WrapWithBrackets(column.Name) + " CHAR(" + length + ")");
             }
             return string.Join(",", columnsCreateStatement);
         }
 
-        private XmlDocument CreateFormatFile()
+        private XmlDocument CreateBcpFormatFile()
         {
             const string xsiUri = "http://www.w3.org/2001/XMLSchema-instance";
             var ff = new XmlDocument();
@@ -2658,9 +2696,9 @@ namespace Fable
             return ff;
         }
 
-        private void CreateFormatFile(string saveToPath)
+        private void CreateBcpFormatFile(string saveToPath)
         {
-            var xml = CreateFormatFile();
+            var xml = CreateBcpFormatFile();
             xml.Save(saveToPath);
         }
 

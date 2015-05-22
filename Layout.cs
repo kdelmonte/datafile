@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 
-namespace Fable
+namespace DataFile
 {
     public class Layout
     {
@@ -24,7 +24,7 @@ namespace Fable
             }
         }
 
-        public Layout(string name, FableInfo leadFileInfo)
+        public Layout(string name, DataFileInfo leadFileInfo)
         {
             Name = name;
             Columns = leadFileInfo.Columns;
