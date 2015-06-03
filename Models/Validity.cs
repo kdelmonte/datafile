@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace DataFile
+namespace DataFile.Models
 {
     public class Validity
     {

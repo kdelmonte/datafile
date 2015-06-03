@@ -1,9 +1,9 @@
-﻿namespace DataFile
+﻿namespace DataFile.Models
 {
     public enum Format
     {
         Unknown = 0,
-        FileSessionImport = 1,
+        DatabaseImport = 1,
         CharachterDelimited = 2,
         CommaDelimited = 3,
         XLSX = 4,

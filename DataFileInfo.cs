@@ -5,62 +5,31 @@ using System.Data;
 using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml;
-using DataFile.Query;
+using DataFile.DatabaseInterfaces;
+using DataFile.Models;
+using DataFile.Models.Query;
 using Excel;
 
 namespace DataFile
 {
-    public class DataFileInfo
+    public partial class DataFileInfo
     {
-        #region DataFile
+        
+        // Properties
+        //=================================================
 
         public delegate void OnInitializeHandler();
 
-        public delegate void OnSqlSessionCloseHandler();
+        public delegate void OnDatabaseSessionCloseHandler();
 
-        public delegate void OnSqlSessionOpenHandler();
+        public delegate void OnDatabaseSessionOpenHandler();
 
         private const int NumberOfExampleRows = 15;
-        private const int NumberOfExampleRowsIfFixedWidth = 5;
         private const string DefaultColumnName = "Column";
-        public SqlConnectionStringBuilder ConnectionStringBuilder;
-        public int TotalRecords;
-        private string _connectionString;
+        public int TotalRecords { get; private set; }
         private Layout _layout;
-
-        public DataFileInfo()
-        {
-            UniqueIdentifier = Guid.NewGuid().ToString("N");
-            HasColumnHeaders = true;
-            AggregatableColumns = new ColumnList();
-            SampleRows = new List<List<string>>();
-            Validity = new Validity();
-            InitializeColumnList();
-        }
-
-        public DataFileInfo(string filePath, string connectionString = null) : this()
-        {
-            _connectionString = connectionString;
-            Initialize(filePath, true);
-        }
-
-        public DataFileInfo(string filePath, bool fileHasColumns, string connectionString = null) : this()
-        {
-            _connectionString = connectionString;
-            Initialize(filePath, fileHasColumns);
-        }
-
-        public DataFileInfo(string source, Layout layout, string connectionString = null) : this()
-        {
-            _connectionString = connectionString;
-            Layout = layout;
-            Initialize(source, Layout != null && Layout.HasColumnHeaders);
-        }
-
         public string UniqueIdentifier { get; private set; }
 
         public ColumnList AggregatableColumns { get; set; }
@@ -69,7 +38,18 @@ namespace DataFile
         public bool EvaluatedEntirely { get; set; }
         public List<string> ExcelSheets { get; set; }
         public string Extension { get; set; }
-        public string FieldDelimeter { get; set; }
+        private string _fieldDelimeter;
+
+        public string FieldDelimeter
+        {
+            get { return _fieldDelimeter; }
+            set
+            {
+                _fieldDelimeter = value;
+                Format = GetFileFormatByDelimeter(_fieldDelimeter);
+            }
+        }
+
         public int FirstDataRowIndex { get; set; }
         public Format Format { get; set; }
 
@@ -90,18 +70,22 @@ namespace DataFile
         public string Name { get; set; }
         public string NameWithoutExtension { get; set; }
         public List<List<string>> SampleRows { get; set; }
-        public string Size { get; set; }
+
+        public string Size
+        {
+            get
+            {
+                return GetFileSize(Length);
+            }
+        }
+
         public Validity Validity { get; set; }
         public int Width { get; set; }
+        public IDatabaseInterface DatabaseInterface { get; set; }
 
-        public string ConnectionString
+        public bool Exists
         {
-            get { return _connectionString; }
-            set
-            {
-                _connectionString = value;
-                ConnectionStringBuilder = new SqlConnectionStringBuilder(value);
-            }
+            get { return File.Exists(FullName); }
         }
 
         public string ActiveWorksheet { get; private set; }
@@ -116,51 +100,69 @@ namespace DataFile
                 {
                     Columns = _layout.Columns;
                 }
-                
+
             }
         }
 
-        public bool LeaveSessionOpenOnDispose { get; set; }
+        public bool KeepSessionOpenOnDispose { get; set; }
 
         public event OnInitializeHandler OnInitialize;
-        public event OnSqlSessionOpenHandler OnSqlSessionOpen;
-        public event OnSqlSessionCloseHandler OnSqlSessionClose;
+        public event OnDatabaseSessionOpenHandler OnDatabaseSessionOpen;
+        public event OnDatabaseSessionCloseHandler OnDatabaseSessionClose;
+        
+        // Constructors/Destructors
+        //=================================================
 
-        private void InitializeColumnList()
+        public DataFileInfo(IDatabaseInterface dbInterface = null)
         {
-            Columns = new ColumnList(ColumnList_CollectionChanged);
+            DatabaseInterface = dbInterface;
+            UniqueIdentifier = Guid.NewGuid().ToString("N");
+            HasColumnHeaders = true;
+            AggregatableColumns = new ColumnList();
+            SampleRows = new List<List<string>>();
+            Validity = new Validity();
+            InitializeColumnList();
+        }
+
+        public DataFileInfo(string filePath, IDatabaseInterface dbInterface = null)
+            : this(dbInterface)
+        {
+            Initialize(filePath, true);
+        }
+
+        public DataFileInfo(string filePath, bool fileHasColumns, IDatabaseInterface dbInterface = null)
+            : this(dbInterface)
+        {
+            Initialize(filePath, fileHasColumns);
+        }
+
+        public DataFileInfo(string source, Layout layout, IDatabaseInterface dbInterface = null)
+            : this(dbInterface)
+        {
+            Layout = layout;
+            Initialize(source, Layout != null && Layout.HasColumnHeaders);
         }
 
         ~DataFileInfo()
         {
-            if (!LeaveSessionOpenOnDispose)
+            if (!KeepSessionOpenOnDispose)
             {
                 Close();
             }
         }
 
+        
+        // Public Methods
+        //=================================================
+        
         public void Close()
         {
-            if (!SqlSessionActive) return;
-            EndSqlSession();
-            if (OnSqlSessionClose != null)
+            if (!DatabaseSessionActive) return;
+            CloseDatabaseSession();
+            if (OnDatabaseSessionClose != null)
             {
-                OnSqlSessionClose();
+                OnDatabaseSessionClose();
             }
-        }
-
-        private IExcelDataReader GetExcelDataReader(bool preventColumnRowSkip = false)
-        {
-            var stream = File.Open(FullName, FileMode.Open, FileAccess.Read);
-            var reader = Format == Format.XLSX
-                                ? ExcelReaderFactory.CreateOpenXmlReader(stream)
-                                : ExcelReaderFactory.CreateBinaryReader(stream);
-            reader.IsFirstRowAsColumnNames = HasColumnHeaders;
-            if (!preventColumnRowSkip && HasColumnHeaders)
-            {
-                reader.Read();
-            }
-            return reader;
         }
 
         public void SwitchToWorkSheet(int sheetIndex)
@@ -218,233 +220,6 @@ namespace DataFile
             }
         }
 
-        private void InitializeExcelFile()
-        {
-            IExcelDataReader excelReader = null;
-            try
-            {
-                excelReader = GetExcelDataReader();
-                ExcelSheets = new List<string>();
-                for (var x = 0; x < excelReader.ResultsCount; x++)
-                {
-                    ExcelSheets.Add(excelReader.Name);
-                    excelReader.NextResult();
-                }
-                excelReader.Close();
-                if (ExcelSheets.Any())
-                {
-                    SwitchToWorkSheet(0);
-                }
-            }
-            finally
-            {
-                if (excelReader != null)
-                {
-                    excelReader.Close();
-                }
-            }
-        }
-
-        public void InitializeDelimitedFile()
-        {
-            StreamReader reader = null;
-            try
-            {
-                reader = File.OpenText(FullName);
-                var firstLine = reader.ReadLine();
-                if (firstLine != null)
-                {
-                    if (Extension.ToLower() == ".csv") // trust the extension
-                    {
-                        FieldDelimeter = ",";
-                        SetFormatBasedOnDelimeter();
-                    }
-                    else
-                    {
-                        var delimeters = new[] { "\t", ",", "|", SpecialFieldDelimeter };
-                        foreach (var delimeter in delimeters)
-                        {
-                            if (!firstLine.Contains(delimeter)) continue;
-                            FieldDelimeter = delimeter;
-                            SetFormatBasedOnDelimeter();
-                            break;
-                        }
-                    }
-                    if (FieldDelimeter.Length > 0)
-                    {
-                        var j = 0;
-                        var columns = SplitByFormat(firstLine);
-                        if (HasColumnHeaders)
-                        {
-                            for (var i = 0; i < columns.Length; i++)
-                            {
-                                Columns.Add(new Column(i, columns[i]));
-                            }
-                        }
-                        else
-                        {
-                            for (var i = 0; i < columns.Length; i++)
-                            {
-                                Columns.Add(new Column(i, DefaultColumnName + (i + 1)));
-                            }
-                            SampleRows.Add(columns.ToList());
-                            j++;
-                        }
-                        while (j < NumberOfExampleRows)
-                        {
-                            var row = reader.ReadLine();
-                            if (row == null)
-                            {
-                                break;
-                            }
-                            var fieldItems = SplitByFormat(row).ToList();
-                            for (var x = 0; x < fieldItems.Count; x++)
-                            {
-                                fieldItems[x] = fieldItems[x].Trim();
-                            }
-                            SampleRows.Add(fieldItems);
-                            j++;
-                        }
-                    }
-                    else
-                    {
-                        var j = 0;
-                        HasColumnHeaders = Layout != null && Layout.Columns.Count > 0;
-                        if (HasColumnHeaders)
-                        {
-                            var columnLine = firstLine.ToLower();
-                            foreach (var column in Columns)
-                            {
-                                if (columnLine.Substring(column.Start, column.Length).Trim() ==
-                                    column.Name.ToLower()) continue;
-                                HasColumnHeaders = false;
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            Columns.Add(new Column(0, DefaultColumnName + 1));
-                            SampleRows.Add(new List<string> { TrimQuoteDelimeters(firstLine) });
-                            j++;
-                        }
-                        Format = Format.SpaceDelimited;
-                        while (j < NumberOfExampleRowsIfFixedWidth)
-                        {
-                            var row = reader.ReadLine();
-                            if (row == null)
-                            {
-                                break;
-                            }
-                            SampleRows.Add(new List<string> { TrimQuoteDelimeters(row) });
-                            j++;
-                        }
-                    }
-                    reader.Close();
-                }
-            }
-            finally
-            {
-                if (reader != null) reader.Close();
-            }
-        }
-
-        private void InitializeColumnProperties()
-        {
-            if (!IsFixedWidth)
-            {
-                for (var x = 0; x < Columns.Count; x++)
-                {
-                    var column = Columns[x];
-                    for (var e = FirstDataRowIndex; e < SampleRows.Count; e++)
-                    {
-                        var row = SampleRows[e];
-                        var value = TrimQuoteDelimeters(row[column.Index]);
-                        if (string.IsNullOrEmpty(column.ExampleValue))
-                        {
-                            column.ExampleValue = value;
-                        }
-                        if (value.Length <= column.Length) continue;
-                        column.Length = value.Length;
-                    }
-                    Columns[x] = column;
-                }
-            }
-        }
-
-        private void Initialize(string filePath, bool fileHasColumns)
-        {
-            HasColumnHeaders = fileHasColumns;
-            var sourceFile = new FileInfo(filePath);
-            Length = sourceFile.Length;
-            SetFileSize();
-            FullName = sourceFile.FullName;
-            Name = sourceFile.Name;
-            DirectoryName = sourceFile.DirectoryName + @"\";
-            NameWithoutExtension = Path.GetFileNameWithoutExtension(FullName);
-            Extension = sourceFile.Extension;
-            var extension = Extension.ToLower().Replace(".", "");
-            try
-            {
-                switch (extension)
-                {
-                    case "xls":
-                    case "xlsx":
-                        Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
-                        InitializeExcelFile();
-                        break;
-                    default:
-                        InitializeDelimitedFile();
-                        break;
-                }
-
-                if (SampleRows.Count == 0)
-                {
-                    Validity.AddWarning("File is empty");
-                }
-                foreach (var column in Columns.Where(column => column.Length == 0))
-                {
-                    column.Length = 1;
-                }
-                FirstDataRowIndex = SampleRows.Count > 1 ? 1 : 0;
-                //Get Max Length of values in example rows
-                //Set Example Values
-                InitializeColumnProperties();
-                if (OnInitialize != null)
-                {
-                    OnInitialize();
-                }
-            }
-            catch (Exception ex)
-            {
-                Validity.Errors.Clear();
-                Validity.AddError("Unexpected Error: " + ex.Message);
-            }
-        }
-
-       
-
-        private void SetFormatBasedOnDelimeter()
-        {
-            switch (FieldDelimeter)
-            {
-                case "\t":
-                    Format = Format.TabDelimited;
-                    break;
-                case ",":
-                    Format = Format.CommaDelimited;
-                    break;
-                case "|":
-                    Format = Format.PipeDelimited;
-                    break;
-                default:
-                    if (FieldDelimeter == SpecialFieldDelimeter)
-                    {
-                        Format = Format.FileSessionImport;
-                    }
-                    break;
-            }
-        }
-
         public void EvaluateEntirely()
         {
             TotalRecords = 0;
@@ -498,8 +273,8 @@ namespace DataFile
                                 for (var x = 0; x < Columns.Count; x++)
                                 {
                                     var column = Columns[x];
-                                    //var value = TrimQuoteDelimeters(fields[column.Index]);
-                                    var value = fields[column.Index];
+                                    var value = TrimQuoteDelimeters(fields[column.Index]);
+                                    //var value = fields[column.Index];
                                     if (value.Length > column.Length)
                                     {
                                         column.Length = value.Length;
@@ -529,50 +304,598 @@ namespace DataFile
             }
         }
 
-        public void GetFrequenciesForAggregatableColumns()
+        public void ChangeLayout(Layout layout, List<ColumnMapping> mappings = null)
         {
-            foreach (var aggrCol in AggregatableColumns)
+            Save(Format, null, true, layout, mappings);
+        }
+
+        public void ConvertTo(Format newFormat, Layout layout = null, List<ColumnMapping> mappings = null)
+        {
+            Save(newFormat, null, true, layout, mappings);
+        }
+
+        public DataFileInfo SaveAs(Format newFormat, string targetPath, bool overwrite = false, Layout layout = null, List<ColumnMapping> mappings = null)
+        {
+            Save(newFormat, targetPath, overwrite, layout, mappings);
+            var newLfi = new DataFileInfo(targetPath, Layout);
+            newLfi.CopyPropertiesFromOtherDataFile(this);
+            return newLfi;
+        }
+
+        public DataFileInfo Copy(string targetPath, bool overwrite = false)
+        {
+            File.Copy(FullName, targetPath, overwrite);
+            var newLfi = new DataFileInfo(targetPath, Layout);
+            newLfi.CopyPropertiesFromOtherDataFile(this);
+            return newLfi;
+        }
+
+        public static Format GetFileFormatByDelimeter(string delimeter)
+        {
+            switch (delimeter)
             {
-                aggrCol.FrequencyValues = GetColumnValueFrequency(aggrCol);
+                case "\t":
+                    return Format.TabDelimited;
+                case ",":
+                    return Format.CommaDelimited;
+                case "|":
+                    return Format.PipeDelimited;
+                case "":
+                case " ":
+                    return Format.SpaceDelimited;
+                default:
+                    return delimeter == ImportFieldDelimeter ? Format.DatabaseImport : Format.CharachterDelimited;
             }
         }
 
-        public List<ColumnValueFrequency> GetColumnValueFrequency(Column column, QueryBuilder query = null)
+        public static string GetDelimeterByFileFormat(Format format)
         {
-            if (query == null)
+            switch (format)
             {
-                query = new QueryBuilder(SqlFlavor.TransactSql);
+                case Format.TabDelimited:
+                    return "\t";
+                case Format.CommaDelimited:
+                    return  ",";
+                case Format.PipeDelimited:
+                    return "|";
+                case Format.SpaceDelimited:
+                    return " ";
+                case Format.DatabaseImport:
+                    return ImportFieldDelimeter;
+                default:
+                    return null;
             }
-            StartSqlSession();
-            string sqlName;
-            string alias;
-            if (string.IsNullOrEmpty(column.Alias))
+        }
+
+        public DataFileInfo QueryToFile(DatabaseCommand query = null, string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            return QueryToFile(null, HasColumnHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
+        }
+
+        public DataFileInfo QueryToFile(bool withHeaders, DatabaseCommand query = null,
+            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            return QueryToFile(null, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
+        }
+
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, DatabaseCommand query = null,
+            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            return QueryToFile(targetFilePath, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
+        }
+
+        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<Column> columns, DatabaseCommand query = null,
+            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            return QueryToFile(null, withHeaders, columns, query, newDelimeter, grouplessRecordsOnly, groupId);
+        }
+
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<Column> columns, DatabaseCommand query = null,
+            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            var exportIsFixedWidth = newDelimeter != null && newDelimeter == string.Empty || IsFixedWidth;
+            var overwritingCurrentFile = string.IsNullOrWhiteSpace(targetFilePath) || IsSamePath(FullName, targetFilePath);
+            OpenDatabaseSession();
+            DatabaseQueryToFile(query, targetFilePath, newDelimeter, grouplessRecordsOnly, groupId);
+            var dataFileInfo = overwritingCurrentFile ? this : new DataFileInfo(targetFilePath, false);
+            if (withHeaders)
             {
-                sqlName = BracketWrap(column.Name);
-                alias = sqlName;
+                dataFileInfo.InsertColumnHeaders();
+            }
+            return dataFileInfo;
+        }
+
+        public void InsertColumnHeaders()
+        {
+            if (HasColumnHeaders) return;
+            var colString = GetFileColumnString();
+            StreamWriter writer = null;
+            StreamReader reader = null;
+            try
+            {
+                var tempfile = Path.GetTempFileName();
+                writer = new StreamWriter(tempfile);
+                reader = new StreamReader(FullName);
+                writer.WriteLine(colString);
+                while (!reader.EndOfStream)
+                    writer.WriteLine(reader.ReadLine());
+                writer.Close();
+                reader.Close();
+                File.Copy(tempfile, FullName, true);
+                try
+                {
+                    File.Delete(tempfile);
+                }
+                catch
+                {
+                }
+                HasColumnHeaders = true;
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+                if (writer != null) writer.Close();
+            }
+        }
+
+        public void RemoveColumnHeaders()
+        {
+            if (!HasColumnHeaders) return;
+            StreamWriter writer = null;
+            StreamReader reader = null;
+            try
+            {
+                var tempfile = Path.GetTempFileName();
+                writer = new StreamWriter(tempfile);
+                reader = new StreamReader(FullName);
+                //Skip first line
+                reader.ReadLine();
+                while (!reader.EndOfStream)
+                    writer.WriteLine(reader.ReadLine());
+                writer.Close();
+                reader.Close();
+                File.Copy(tempfile, FullName, true);
+                try
+                {
+                    File.Delete(tempfile);
+                }
+                catch
+                {
+                }
+                HasColumnHeaders = false;
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+                if (writer != null) writer.Close();
+            }
+        }
+
+        public void ImportIntoTable(string targetConnectionString, string targetTable, DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            OpenDatabaseSession();
+            DatabaseQueryToTable(targetConnectionString, targetTable, query, grouplessRecordsOnly, groupId);
+        }
+
+        public int UpdateRecords(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            OpenDatabaseSession();
+            var recordsUpdated = DatabaseUpdate(query, grouplessRecordsOnly, groupId);
+            UpdateFromDatabase();
+            return recordsUpdated;
+        }
+
+        public int DeleteRecords(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            OpenDatabaseSession();
+            var recordsDeleted = DatabaseDelete(query, grouplessRecordsOnly, groupId);
+            UpdateFromDatabase();
+            return recordsDeleted;
+        }
+
+        public void Shuffle()
+        {
+            var query = CreateDatabaseCommand();
+            query.Shuffle();
+            QueryToFile(query);
+        }
+
+        public void CopyPropertiesFromOtherDataFile(DataFileInfo source)
+        {
+            HasColumnHeaders = source.HasColumnHeaders;
+            AggregatableColumns = source.AggregatableColumns;
+            Layout = source.Layout;
+        }
+
+        public List<FileInfo> SplitByParts(int numberOfParts, bool randomize, string newDirectory)
+        {
+            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByParts(int numberOfParts, bool randomize)
+        {
+            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, null, null);
+        }
+
+        public List<FileInfo> SplitByParts(int numberOfParts, int maxSplits = 0, bool randomize = false,
+            string newDirectory = null)
+        {
+            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, maxSplits, newDirectory);
+        }
+
+        public List<FileInfo> SplitByMaxRecords(int maxRecords, bool randomize, string newDirectory)
+        {
+            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByMaxRecords(int maxRecords, bool randomize)
+        {
+            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, null, null);
+        }
+
+        public List<FileInfo> SplitByMaxRecords(int maxRecords, int maxSplits = 0, bool randomize = false,
+            string newDirectory = null)
+        {
+            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, maxSplits, newDirectory);
+        }
+
+        public List<FileInfo> SplitByPercentageOfField(int percentage, string fieldName, bool randomize,
+            string newDirectory)
+        {
+            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByPercentageOfField(int percentage, string fieldName, bool randomize)
+        {
+            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, null, null);
+        }
+
+        public List<FileInfo> SplitByPercentageOfField(int percentage, string fieldName, int maxSplits = 0,
+            bool randomize = false, string newDirectory = null)
+        {
+            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, maxSplits,
+                newDirectory);
+        }
+
+        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+            bool randomize, string newDirectory)
+        {
+            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
+                null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+            bool randomize)
+        {
+            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
+                null, null);
+        }
+
+        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+            int maxSplits = 0, bool randomize = false, string newDirectory = null)
+        {
+            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
+                maxSplits, newDirectory);
+        }
+
+        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, bool randomize, string newDirectory)
+        {
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
+                null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, bool randomize)
+        {
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
+                null, null);
+        }
+
+        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, int maxSplits = 0, bool randomize = false, string newDirectory = null)
+        {
+            return Split(SplitMethod.ByFileQuery, query, null, randomize,
+                maxSplits, newDirectory);
+        }
+
+        public List<FileInfo> SplitByFileSize(long maxBytes, bool randomize, string newDirectory)
+        {
+            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, null, newDirectory);
+        }
+
+        public List<FileInfo> SplitByFileSize(long maxBytes, bool randomize)
+        {
+            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, null, null);
+        }
+
+        public List<FileInfo> SplitByFileSize(long maxBytes, int maxSplits = 0, bool randomize = false,
+            string newDirectory = null)
+        {
+            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, maxSplits, newDirectory);
+        }
+
+        public List<List<FileInfo>> Split(List<SplitOption> options)
+        {
+            var rtnList = new List<List<FileInfo>>();
+
+            for (var x = 0; x < options.Count; x++)
+            {
+                var splitOption = options[x];
+                var exportDirectoryPath = DirectoryName + "Level_" + (x + 1) + "_" + splitOption.Method;
+                var filesToSplit = rtnList.Count != 0
+                    ? rtnList[rtnList.Count - 1]
+                    : new List<FileInfo> { new FileInfo(FullName) };
+
+                var levelSplits = new List<FileInfo>();
+                foreach (var file in filesToSplit)
+                {
+                    levelSplits.AddRange(Split(splitOption.Method, splitOption.PrimaryValue,
+                        splitOption.SecondaryValue, splitOption.Randomize, splitOption.MaxSplits,
+                        exportDirectoryPath, file.FullName));
+                }
+                rtnList.Add(levelSplits);
+            }
+            rtnList.Reverse();
+            return rtnList;
+        }
+
+        public void Delete()
+        {
+            File.Delete(FullName);
+        }
+
+        // Private Methods
+        //=================================================
+
+        private void InitializeExcelFile()
+        {
+            IExcelDataReader excelReader = null;
+            try
+            {
+                excelReader = GetExcelDataReader();
+                ExcelSheets = new List<string>();
+                for (var x = 0; x < excelReader.ResultsCount; x++)
+                {
+                    ExcelSheets.Add(excelReader.Name);
+                    excelReader.NextResult();
+                }
+                excelReader.Close();
+                if (ExcelSheets.Any())
+                {
+                    SwitchToWorkSheet(0);
+                }
+            }
+            finally
+            {
+                if (excelReader != null)
+                {
+                    excelReader.Close();
+                }
+            }
+        }
+
+        private void InitializeCharacterDelimitedFile()
+        {
+            StreamReader reader = null;
+            try
+            {
+                reader = File.OpenText(FullName);
+                var firstLine = reader.ReadLine();
+                var rowCount = 0;
+                var columns = SplitByFormat(firstLine);
+                if (HasColumnHeaders)
+                {
+                    for (var i = 0; i < columns.Length; i++)
+                    {
+                        Columns.Add(new Column(i, columns[i]));
+                    }
+                }
+                else
+                {
+                    for (var i = 0; i < columns.Length; i++)
+                    {
+                        Columns.Add(new Column(i, DefaultColumnName + (i + 1)));
+                    }
+                    SampleRows.Add(columns.ToList());
+                    rowCount++;
+                }
+                while (rowCount < NumberOfExampleRows)
+                {
+                    var row = reader.ReadLine();
+                    if (row == null)
+                    {
+                        break;
+                    }
+                    var fieldItems = SplitByFormat(row).ToList();
+                    for (var i = 0; i < fieldItems.Count; i++)
+                    {
+                        fieldItems[i] = fieldItems[i].Trim();
+                    }
+                    SampleRows.Add(fieldItems);
+                    rowCount++;
+                }
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+            }
+        }
+
+        private void InitializeSpaceDelimitedFile()
+        {
+            StreamReader reader = null;
+            try
+            {
+                reader = File.OpenText(FullName);
+                var firstLine = reader.ReadLine();
+                var rowCount = 0;
+                HasColumnHeaders = Layout != null && Layout.Columns.Count > 0;
+                if (HasColumnHeaders)
+                {
+                    var columnLine = firstLine.ToLower();
+                    foreach (var column in Columns)
+                    {
+                        if (columnLine.Substring(column.Start, column.Length).Trim() ==
+                            column.Name.ToLower()) continue;
+                        HasColumnHeaders = false;
+                        break;
+                    }
+                }
+                else
+                {
+                    Columns.Add(new Column(0, DefaultColumnName + 1));
+                    SampleRows.Add(new List<string> { TrimQuoteDelimeters(firstLine) });
+                    rowCount++;
+                }
+                Format = Format.SpaceDelimited;
+                while (rowCount < NumberOfExampleRows)
+                {
+                    var row = reader.ReadLine();
+                    if (row == null)
+                    {
+                        break;
+                    }
+                    SampleRows.Add(new List<string> { TrimQuoteDelimeters(row) });
+                    rowCount++;
+                }
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+            }
+        }
+
+        private void DetermineFieldDelimeter()
+        {
+            StreamReader reader = null;
+            try
+            {
+                reader = File.OpenText(FullName);
+                var firstLine = reader.ReadLine();
+                if (firstLine != null)
+                {
+                    if (Extension.ToLower() == ".csv")
+                    {
+                        FieldDelimeter = ",";
+                    }
+                    else
+                    {
+                        var delimeters = new[] { "\t", ",", "|", ImportFieldDelimeter };
+                        foreach (var delimeter in delimeters)
+                        {
+                            if (!firstLine.Contains(delimeter)) continue;
+                            FieldDelimeter = delimeter;
+                            break;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (reader != null) reader.Close();
+            }
+        }
+
+        private void InitializeDelimitedFile()
+        {
+            DetermineFieldDelimeter();
+            if (!IsFixedWidth)
+            {
+                InitializeCharacterDelimitedFile();
             }
             else
             {
-                sqlName = column.Name;
-                alias = BracketWrap(column.Alias);
+                InitializeSpaceDelimitedFile();
             }
-            query.Select(sqlName + " AS " + alias + ", COUNT(*) as [Count]")
-                .OrderBy("COUNT(*) DESC");
-            var dtResults = GetDataTable(query);
-            var frequencyList = new List<ColumnValueFrequency>();
-            foreach (DataRow row in dtResults.Rows)
+        }
+
+        private void InitializeColumnProperties()
+        {
+            if (!IsFixedWidth)
             {
-                var value = row[0];
-                var count = Convert.ToInt32(row[1]);
-                var percentage = (double) count/TotalRecords;
-                var freq = new ColumnValueFrequency(value.ToString(), count, percentage);
-                frequencyList.Add(freq);
+                for (var x = 0; x < Columns.Count; x++)
+                {
+                    var column = Columns[x];
+                    for (var e = FirstDataRowIndex; e < SampleRows.Count; e++)
+                    {
+                        var row = SampleRows[e];
+                        var value = TrimQuoteDelimeters(row[column.Index]);
+                        if (string.IsNullOrEmpty(column.ExampleValue))
+                        {
+                            column.ExampleValue = value;
+                        }
+                        if (value.Length <= column.Length) continue;
+                        column.Length = value.Length;
+                    }
+                    Columns[x] = column;
+                }
             }
-            if (column.Index >= 0)
+        }
+
+        private void InitializeColumnList()
+        {
+            Columns = new ColumnList(ColumnList_CollectionChanged);
+        }
+
+        private void Initialize(string filePath, bool fileHasColumns)
+        {
+            HasColumnHeaders = fileHasColumns;
+            var sourceFile = new FileInfo(filePath);
+            Length = sourceFile.Length;
+            FullName = sourceFile.FullName;
+            Name = sourceFile.Name;
+            DirectoryName = sourceFile.DirectoryName + @"\";
+            NameWithoutExtension = Path.GetFileNameWithoutExtension(FullName);
+            Extension = sourceFile.Extension;
+            var extension = Extension.ToLower().Replace(".", "");
+            try
             {
-                Columns[column.Index].FrequencyValues = frequencyList;
+                switch (extension)
+                {
+                    case "xls":
+                    case "xlsx":
+                        Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
+                        InitializeExcelFile();
+                        break;
+                    default:
+                        InitializeDelimitedFile();
+                        break;
+                }
+
+                if (SampleRows.Count == 0)
+                {
+                    Validity.AddWarning("File is empty");
+                }
+                foreach (var column in Columns.Where(column => column.Length == 0))
+                {
+                    column.Length = 1;
+                }
+                FirstDataRowIndex = SampleRows.Count > 1 ? 1 : 0;
+                //Get Max Length of values in example rows
+                //Set Example Values
+                InitializeColumnProperties();
+                if (OnInitialize != null)
+                {
+                    OnInitialize();
+                }
             }
-            return frequencyList;
+            catch (Exception ex)
+            {
+                Validity.Errors.Clear();
+                Validity.AddError("Unexpected Error: " + ex.Message);
+            }
+        }
+
+        private IExcelDataReader GetExcelDataReader(bool preventColumnRowSkip = false)
+        {
+            var stream = File.Open(FullName, FileMode.Open, FileAccess.Read);
+            var reader = Format == Format.XLSX
+                                ? ExcelReaderFactory.CreateOpenXmlReader(stream)
+                                : ExcelReaderFactory.CreateBinaryReader(stream);
+            reader.IsFirstRowAsColumnNames = HasColumnHeaders;
+            if (!preventColumnRowSkip && HasColumnHeaders)
+            {
+                reader.Read();
+            }
+            return reader;
         }
 
         protected string ModifyValueBasedOnSettings(string value)
@@ -581,7 +904,7 @@ namespace DataFile
             switch (Format)
             {
                 case Format.SpaceDelimited:
-                case Format.FileSessionImport:
+                case Format.DatabaseImport:
                 case Format.XLSX:
                 case Format.XLS:
                     forceRemovalOfQuotes = true;
@@ -638,7 +961,7 @@ namespace DataFile
             }
         }
 
-        public static string[] ParseCsvRow(string r)
+        protected static string[] ParseCsvRow(string r)
         {
             var resp = new List<string>();
             var cont = false;
@@ -697,51 +1020,9 @@ namespace DataFile
             return resp.ToArray();
         }
 
-        public void ChangeLayout(Layout layout, List<ColumnMapping> mappings = null)
-        {
-            Save(Format, null, true, layout, mappings);
-        }
-
-        public void ConvertTo(Format newFormat, Layout layout = null, List<ColumnMapping> mappings = null)
-        {
-            Save(newFormat, null, true, layout, mappings);
-        }
-
-        public DataFileInfo SaveAs(Format newFormat, string targetPath, bool overwrite = false, Layout layout = null, List<ColumnMapping> mappings = null)
-        {
-            Save(newFormat, targetPath, overwrite, layout, mappings);
-            var newLfi = new DataFileInfo(targetPath, Layout);
-            newLfi.CopyPropertiesFromOtherDataFile(this);
-            return newLfi;
-        }
-
-        public DataFileInfo Copy(string targetPath, bool overwrite = false)
-        {
-            File.Copy(FullName, targetPath, overwrite);
-            var newLfi = new DataFileInfo(targetPath, Layout);
-            newLfi.CopyPropertiesFromOtherDataFile(this);
-            return newLfi;
-        }
-
         protected static bool LineIsEmpty(string line, string delimeter)
         {
             return string.IsNullOrEmpty(line) || line.Replace(delimeter, "").Trim().Length == 0;
-        }
-
-        public static Format GetFileFormatByDelimeter(string delimeter)
-        {
-            switch (delimeter)
-            {
-                case ",":
-                    return Format.CommaDelimited;
-                case "\t":
-                    return Format.TabDelimited;
-                case "":
-                    return Format.SpaceDelimited;
-                case "|":
-                    return Format.PipeDelimited;
-            }
-            return Format.Unknown;
         }
 
         protected void Save(Format newFormat, string newFilePath, bool overwrite, Layout newFixedWidthLayout, List<ColumnMapping> mappings)
@@ -782,10 +1063,10 @@ namespace DataFile
                 case Format.PipeDelimited:
                     newDelimeter = "|";
                     break;
-                case Format.FileSessionImport:
-                    newDelimeter = SpecialFieldDelimeter;
+                case Format.DatabaseImport:
+                    newDelimeter = ImportFieldDelimeter;
                     forceRemovalOfQuotes = true;
-                    newExtension = SqlImportFileExtension;
+                    newExtension = DatabaseImportFileExtension;
                     break;
                 case Format.XLS:
                 case Format.XLSX:
@@ -1134,7 +1415,6 @@ namespace DataFile
                 Name = fi.Name;
                 NameWithoutExtension = Path.GetFileNameWithoutExtension(FullName);
                 Length = fi.Length;
-                SetFileSize();
                 if (eligibleForLayoutChange)
                 {
                     Layout = newFixedWidthLayout;
@@ -1153,293 +1433,12 @@ namespace DataFile
             }
         }
 
-        protected void UpdatePhysicalFileFromSql()
+        protected void UpdateFromDatabase()
         {
             QueryToFile(FullName, HasColumnHeaders);
         }
 
-        public DataFileInfo QueryToFile(QueryBuilder query = null, string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return QueryToFile(null, HasColumnHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
-        }
-
-        public DataFileInfo QueryToFile(bool withHeaders, QueryBuilder query = null,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return QueryToFile(null, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
-        }
-
-        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, QueryBuilder query = null,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return QueryToFile(targetFilePath, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
-        }
-
-        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<Column> columns, QueryBuilder query = null,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return QueryToFile(null, withHeaders, columns, query, newDelimeter, grouplessRecordsOnly, groupId);
-        }
-
-        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<Column> columns, QueryBuilder query = null,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            var exportIsFixedWidth = newDelimeter != null && newDelimeter == string.Empty || IsFixedWidth;
-            var overwritingCurrentFile = string.IsNullOrWhiteSpace(targetFilePath) || IsSamePath(FullName, targetFilePath);
-            StartSqlSession();
-            SqlQueryToFile(GetSqlColumnString(columns ?? Columns, exportIsFixedWidth), query, targetFilePath,
-                newDelimeter, grouplessRecordsOnly, groupId);
-
-            var dataFileInfo = overwritingCurrentFile ? this : new DataFileInfo(targetFilePath, false);
-            if (withHeaders)
-            {
-                dataFileInfo.InsertColumnHeaders();
-            }
-            return dataFileInfo;
-        }
-
-        public void InsertColumnHeaders()
-        {
-            if (HasColumnHeaders) return;
-            var colString = GetFileColumnString();
-            StreamWriter writer = null;
-            StreamReader reader = null;
-            try
-            {
-                var tempfile = Path.GetTempFileName();
-                writer = new StreamWriter(tempfile);
-                reader = new StreamReader(FullName);
-                writer.WriteLine(colString);
-                while (!reader.EndOfStream)
-                    writer.WriteLine(reader.ReadLine());
-                writer.Close();
-                reader.Close();
-                File.Copy(tempfile, FullName, true);
-                try
-                {
-                    File.Delete(tempfile);
-                }
-                catch
-                {
-                }
-                HasColumnHeaders = true;
-            }
-            finally
-            {
-                if (reader != null) reader.Close();
-                if (writer != null) writer.Close();
-            }
-        }
-
-        public void RemoveColumnHeaders()
-        {
-            if (!HasColumnHeaders) return;
-            StreamWriter writer = null;
-            StreamReader reader = null;
-            try
-            {
-                var tempfile = Path.GetTempFileName();
-                writer = new StreamWriter(tempfile);
-                reader = new StreamReader(FullName);
-                //Skip first line
-                reader.ReadLine();
-                while (!reader.EndOfStream)
-                    writer.WriteLine(reader.ReadLine());
-                writer.Close();
-                reader.Close();
-                File.Copy(tempfile, FullName, true);
-                try
-                {
-                    File.Delete(tempfile);
-                }
-                catch
-                {
-                }
-                HasColumnHeaders = false;
-            }
-            finally
-            {
-                if (reader != null) reader.Close();
-                if (writer != null) writer.Close();
-            }
-        }
-
-        public void ImportIntoTable(string targetConnectionString, string targetTable, ColumnList columns = null, QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            StartSqlSession();
-            if (query == null)
-            {
-                query = new QueryBuilder(SqlFlavor.TransactSql);
-            }
-            query.Select(GetSqlColumnString(columns ?? Columns));
-            SqlQueryToTable(targetConnectionString, targetTable, query, grouplessRecordsOnly, groupId);
-        }
-
-        public int UpdateRecords(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            StartSqlSession();
-            var recordsUpdated = SqlUpdate(groupId, query, grouplessRecordsOnly);
-            UpdatePhysicalFileFromSql();
-            return recordsUpdated;
-        }
-
-        public int DeleteRecords(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            StartSqlSession();
-            var recordsDeleted = SqlDelete(groupId, query, grouplessRecordsOnly);
-            UpdatePhysicalFileFromSql();
-            return recordsDeleted;
-        }
-
-        public void Shuffle()
-        {
-            var query = new QueryBuilder(SqlFlavor.TransactSql);
-            query.OrderBy("NEWID()");
-            QueryToFile(query);
-        }
-
-        public void CopyPropertiesFromOtherDataFile(DataFileInfo source)
-        {
-            HasColumnHeaders = source.HasColumnHeaders;
-            AggregatableColumns = source.AggregatableColumns;
-            Layout = source.Layout;
-        }
-
-        public List<FileSummary> SplitByParts(int numberOfParts, bool randomize, string newDirectory)
-        {
-            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByParts(int numberOfParts, bool randomize)
-        {
-            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, null, null);
-        }
-
-        public List<FileSummary> SplitByParts(int numberOfParts, int maxSplits = 0, bool randomize = false,
-            string newDirectory = null)
-        {
-            return Split(SplitMethod.ByParts, numberOfParts, null, randomize, maxSplits, newDirectory);
-        }
-
-        public List<FileSummary> SplitByMaxRecords(int maxRecords, bool randomize, string newDirectory)
-        {
-            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByMaxRecords(int maxRecords, bool randomize)
-        {
-            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, null, null);
-        }
-
-        public List<FileSummary> SplitByMaxRecords(int maxRecords, int maxSplits = 0, bool randomize = false,
-            string newDirectory = null)
-        {
-            return Split(SplitMethod.ByMaxRecords, maxRecords, null, randomize, maxSplits, newDirectory);
-        }
-
-        public List<FileSummary> SplitByPercentageOfField(int percentage, string fieldName, bool randomize,
-            string newDirectory)
-        {
-            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByPercentageOfField(int percentage, string fieldName, bool randomize)
-        {
-            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, null, null);
-        }
-
-        public List<FileSummary> SplitByPercentageOfField(int percentage, string fieldName, int maxSplits = 0,
-            bool randomize = false, string newDirectory = null)
-        {
-            return Split(SplitMethod.ByPercentage, percentage, fieldName, randomize, maxSplits,
-                newDirectory);
-        }
-
-        public List<FileSummary> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
-            bool randomize, string newDirectory)
-        {
-            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
-                null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
-            bool randomize)
-        {
-            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
-                null, null);
-        }
-
-        public List<FileSummary> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
-            int maxSplits = 0, bool randomize = false, string newDirectory = null)
-        {
-            return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
-                maxSplits, newDirectory);
-        }
-
-        public List<FileSummary> SplitByFileQuery(QueryBuilder query, bool randomize, string newDirectory)
-        {
-            return Split(SplitMethod.ByFileQuery, query, null, randomize,
-                null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByFileQuery(QueryBuilder query, bool randomize)
-        {
-            return Split(SplitMethod.ByFileQuery, query, null, randomize,
-                null, null);
-        }
-
-        public List<FileSummary> SplitByFileQuery(QueryBuilder query, int maxSplits = 0, bool randomize = false, string newDirectory = null)
-        {
-            return Split(SplitMethod.ByFileQuery, query, null, randomize,
-                maxSplits, newDirectory);
-        }
-
-        public List<FileSummary> SplitByFileSize(long maxBytes, bool randomize, string newDirectory)
-        {
-            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, null, newDirectory);
-        }
-
-        public List<FileSummary> SplitByFileSize(long maxBytes, bool randomize)
-        {
-            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, null, null);
-        }
-
-        public List<FileSummary> SplitByFileSize(long maxBytes, int maxSplits = 0, bool randomize = false,
-            string newDirectory = null)
-        {
-            return Split(SplitMethod.ByFileSize, maxBytes, null, randomize, maxSplits, newDirectory);
-        }
-
-        public List<List<FileSummary>> Split(List<SplitOption> options)
-        {
-            var rtnList = new List<List<FileSummary>>();
-
-            for (var x = 0; x < options.Count; x++)
-            {
-                var splitOption = options[x];
-                var exportDirectoryPath = DirectoryName + "Level_" + (x + 1) + "_" + splitOption.Method;
-                var filesToSplit = rtnList.Count != 0
-                    ? rtnList[rtnList.Count - 1]
-                    : new List<FileSummary> {new FileSummary(FullName)};
-
-                var levelSplits = new List<FileSummary>();
-                foreach (var file in filesToSplit)
-                {
-                    levelSplits.AddRange(Split(splitOption.Method, splitOption.PrimaryValue,
-                        splitOption.SecondaryValue, splitOption.Randomize, splitOption.MaxSplits,
-                        exportDirectoryPath, file.FullName));
-                }
-                foreach (var f in levelSplits)
-                {
-                    f.Attributes["SplitLevel"] = (x + 1);
-                }
-                rtnList.Add(levelSplits);
-            }
-            rtnList.Reverse();
-            return rtnList;
-        }
-
-        protected List<FileSummary> Split(SplitMethod splitBy, object valueA, object valueB,
+        protected List<FileInfo> Split(SplitMethod splitBy, object valueA, object valueB,
             bool randomize,
             object maxSplits, string newDirectory, string filePath = null)
         {
@@ -1458,12 +1457,11 @@ namespace DataFile
                     newDirectory += @"\";
                 }
             }
-            var query = new QueryBuilder(SqlFlavor.TransactSql);
+            var query = CreateDatabaseCommand();
             var fileList = new List<string>();
             const string partSuffix = "_Part";
             const string incrementPlaceHolder = "[increment]";
             const string countColumnName = "____COUNT";
-            const string randomizer = "NEWID()";
             var templateFileName = (string.IsNullOrEmpty(newDirectory) ? file.DirectoryName + @"\" : newDirectory) +
                                    file.NameWithoutExtension + partSuffix + incrementPlaceHolder + file.Extension;
             SqlDataReader dr = null;
@@ -1480,7 +1478,7 @@ namespace DataFile
                 switch (splitBy)
                 {
                     case SplitMethod.ByField:
-                        file.StartSqlSession();
+                        file.OpenDatabaseSession();
                         var columnsWithAliases = valueA.ToString();
                         var columnsWithoutAliases = valueB.ToString();
                         sqlColString = columnsWithAliases + ", COUNT(*) AS '" + countColumnName + "'";
@@ -1510,7 +1508,7 @@ namespace DataFile
                             for (var x = 0; x < counts.Columns.Count; x++)
                             {
                                 var column = counts.Columns[x];
-                                var value = SqlClean(row[x].ToString());
+                                var value = row[x].ToString();
                                 where += column.ColumnName + " = '" + value + "'";
                                 if (x != counts.Columns.Count - 1)
                                 {
@@ -1518,10 +1516,10 @@ namespace DataFile
                                 }
                             }
 
-                            query.Select(file.GetSqlColumnString()).Where(where);
+                            query.Where(where);
                             if (randomize)
                             {
-                                query.OrderBy(randomizer);
+                                query.Shuffle();
                             }
                             dr = file.GetDataReader(query);
                             while (dr.Read())
@@ -1555,7 +1553,7 @@ namespace DataFile
                         break;
                     case SplitMethod.ByFileQuery:
                         var whereClause = valueA.ToString();
-                        file.StartSqlSession();
+                        file.OpenDatabaseSession();
                         targetFileName =
                             GetNextAvailableName(templateFileName.Replace(incrementPlaceHolder, increment.ToString()));
                         writer = new StreamWriter(targetFileName);
@@ -1567,10 +1565,10 @@ namespace DataFile
                             reader.ReadLine(); //Skip columns
                         }
                         reader.Close();
-                        query.Select(file.GetSqlColumnString()).Where(whereClause);
+                        query.Where(whereClause);
                         if (randomize)
                         {
-                            query.OrderBy(randomizer);
+                            query.Shuffle();
                         }
                         dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
                         while (dr.Read())
@@ -1590,10 +1588,9 @@ namespace DataFile
                         writer.Flush();
                         writer.Close();
 
-                        query.Select(file.GetSqlColumnString());
                         if (randomize)
                         {
-                            query.OrderBy(randomizer);
+                            query.Shuffle();
                         }
                         dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
 
@@ -1643,8 +1640,8 @@ namespace DataFile
                         if (randomize)
                         {
                             reader.Close();
-                            file.StartSqlSession();
-                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            file.OpenDatabaseSession();
+                            query.Shuffle();
                             
                             dr = file.GetDataReader(query);
                             while (dr.Read())
@@ -1736,8 +1733,8 @@ namespace DataFile
                         if (randomize)
                         {
                             reader.Close();
-                            file.StartSqlSession();
-                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            file.OpenDatabaseSession();
+                            query.Shuffle();
                             dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
@@ -1800,11 +1797,13 @@ namespace DataFile
                         }
                         break;
                     case SplitMethod.ByPercentage:
-                        file.StartSqlSession();
+                        file.OpenDatabaseSession();
                         var percentage = Convert.ToDouble(valueA);
                         var partitionField = valueB.ToString();
                         var fileSplits = Convert.ToInt32(Math.Floor(100/percentage)).ToString();
-                        sqlColString = file.GetSqlColumnString() + ",NTILE(" + fileSplits + ") OVER(PARTITION BY " +
+                        var sqlColumnString = "TODO";
+                        var randomizer = "NEWID()";
+                        sqlColString = sqlColumnString + ",NTILE(" + fileSplits + ") OVER(PARTITION BY " +
                                        partitionField + " ORDER BY " +
                                        (randomize ? randomizer : "iFileSessionRecordId") + " DESC) AS FileGroup";
                         query.Select(sqlColString).GroupBy("FileGroup");
@@ -1861,10 +1860,10 @@ namespace DataFile
                         }
                         if (randomize)
                         {
-                            file.StartSqlSession();
+                            file.OpenDatabaseSession();
                             calculatedMaxRecords =
                                 Convert.ToInt32(Math.Round((double) file.TotalRecords/totalParts));
-                            query.Select(file.GetSqlColumnString()).OrderBy(randomizer);
+                            query.Shuffle();
                             dr = file.GetDataReader(query);
                             while (dr.Read())
                             {
@@ -1955,50 +1954,12 @@ namespace DataFile
                     dr.Dispose();
                 }
             }
-            var rtnList = new List<FileSummary>();
+            var rtnList = new List<FileInfo>();
             foreach (var path in fileList)
             {
-                rtnList.Add(new FileSummary(path));
+                rtnList.Add(new FileInfo(path));
             }
             return rtnList;
-        }
-
-        protected static string SqlClean(string s)
-        {
-            return s.Replace("'", "''");
-        }
-
-        public void Delete()
-        {
-            File.Delete(FullName);
-        }
-
-        protected string GetSqlColumnString()
-        {
-            return GetSqlColumnString(Columns, IsFixedWidth);
-        }
-
-        protected string GetSqlColumnString(IEnumerable<Column> columns, bool withAlias = true)
-        {
-            return GetSqlColumnString(columns, IsFixedWidth, withAlias);
-        }
-
-        protected static string GetSqlColumnString(IEnumerable<Column> columns, bool fixedWidth, bool withAlias)
-        {
-            var formattedColumns = !fixedWidth
-                ? columns.Select(column => (BracketWrap(column.Name.Trim()) +
-                                            (!withAlias || string.IsNullOrWhiteSpace(column.Alias)
-                                                ? ""
-                                                : " AS " + BracketWrap(column.Alias)
-                                                )
-                    ))
-                : columns.Select(column => (BracketWrap(column.Name) +
-                                            (!withAlias || string.IsNullOrWhiteSpace(column.Alias)
-                                                ? ""
-                                                : " AS " + BracketWrap(column.Alias)
-                                                )
-                    ));
-            return string.Join(",", formattedColumns);
         }
 
         protected string GetFileColumnString()
@@ -2028,8 +1989,9 @@ namespace DataFile
             return columnLine;
         }
 
-        protected string GetFileColumnString(Format format, ICollection<Column> columns)
+        protected string GetFileColumnString(Format format, IEnumerable<Column> columns)
         {
+            var columnList = columns.ToList();
             var delimeter = "";
             switch (format)
             {
@@ -2042,16 +2004,16 @@ namespace DataFile
                 case Format.PipeDelimited:
                     delimeter = "|";
                     break;
-                case Format.FileSessionImport:
-                    delimeter = SpecialFieldDelimeter;
+                case Format.DatabaseImport:
+                    delimeter = ImportFieldDelimeter;
                     break;
             }
             var columnLine = "";
             if (format != Format.SpaceDelimited)
             {
-                for (var c = 0; c < columns.Count; c++)
+                for (var c = 0; c < columnList.Count; c++)
                 {
-                    var column = Columns[c];
+                    var column = columnList[c];
                     columnLine += ModifyValueBasedOnSettings(column.Name);
                     if (c != Columns.Count - 1)
                     {
@@ -2061,7 +2023,7 @@ namespace DataFile
             }
             else
             {
-                foreach (var column in columns)
+                foreach (var column in columnList)
                 {
                     var name = ModifyValueBasedOnSettings(column.Name);
                     name = ModifyValueBasedOnColumnLength(column, name);
@@ -2100,12 +2062,7 @@ namespace DataFile
             return NormalizePath(path1) == NormalizePath(path2);
         }
 
-        public static string ReplaceWhiteSpaceWithNbsp(string value)
-        {
-            return Regex.Replace(value, @"\s", "&nbsp;");
-        }
-
-        public static string GetNextAvailableName(string filePath)
+        protected static string GetNextAvailableName(string filePath)
         {
             var targetFile = new FileInfo(filePath);
             var nameWoExt = targetFile.Name.Replace(targetFile.Extension, "");
@@ -2120,42 +2077,18 @@ namespace DataFile
             return targetFile.FullName;
         }
 
-        private void SetFileSize()
-        {
-            Size = GetFileSize(Length);
-        }
-
         private void ColumnList_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
             RefactorColumnNames();
-            if (!SqlSessionActive) return;
+            if (!DatabaseSessionActive) return;
             if (e.OldItems.Count > 0)
             {
-                RemoveColumnsInSql((IEnumerable<Column>) e.OldItems);
+                //RemoveColumnsInSql((IEnumerable<Column>) e.OldItems);
             }
             if (e.NewItems.Count > 0)
             {
-                AddColumnsInSql((IEnumerable<Column>) e.OldItems);
+                //AddColumnsInSql((IEnumerable<Column>) e.OldItems);
             }
-        }
-
-        private void AddColumnsInSql(IEnumerable<Column> columns)
-        {
-            if (SqlSessionActive) return;
-            UpdateSchema("DROP COLUMN " + GetColumnDeclarationStatement(columns));
-        }
-
-        private void RemoveColumnsInSql(IEnumerable<Column> columns)
-        {
-            if (!SqlSessionActive) return;
-
-            UpdateSchema("ADD COLUMN " + GetSqlColumnString(columns, false));
-        }
-
-        private void UpdateSchema(string alterCommand)
-        {
-            if (!SqlSessionActive) return;
-            ModifySqlSchema(alterCommand);
         }
 
         private void RefactorColumnNames()
@@ -2218,15 +2151,9 @@ namespace DataFile
             if (Columns.Count <= 0) return;
             for (var x = 0; x < AggregatableColumns.Count; x++)
             {
-                try
+                if (AggregatableColumns[x].Index != -1)
                 {
-                    if (AggregatableColumns[x].Index != -1)
-                    {
-                        AggregatableColumns[x] = Columns[AggregatableColumns[x].Index];
-                    }
-                }
-                catch
-                {
+                    AggregatableColumns[x] = Columns[AggregatableColumns[x].Index];
                 }
             }
         }
@@ -2255,473 +2182,5 @@ namespace DataFile
             //Bytes
             return String.Concat(bytes, " Bytes");
         }
-
-        #endregion
-
-        #region SqlSession
-
-        private static FileInfo currentDll = new FileInfo(Assembly.GetExecutingAssembly().Location);
-        private static string SqlProcedureFilesPath
-        {
-            get
-            {
-                var path = Path.Combine(currentDll.DirectoryName, @"SqlSessionProcedures\SqlServer");
-                return path;
-            }
-        }
-        public static string SqlImportFilesDropPath = @"C:\importFiles";
-        public static readonly string SpecialFieldDelimeter = "<#fin#>";
-        public static readonly string SqlImportFileExtension = ".fsimport";
-        public static readonly string SqlRecordIdColumnName = "___RecordId";
-        public static readonly string SqlRecordGroupColumnName = "___GroupId";
-        public static int SqlCommandTimeout = 36000;
-        public string SqlFormatFilePath;
-        public bool SqlSessionActive { get; private set; }
-
-        protected void StartSqlSession()
-        {
-            if (SqlSessionActive) return;
-            if (string.IsNullOrWhiteSpace(_connectionString))
-            {
-                throw new ArgumentException("The SqlConnectionString must be set in order to use this operation");
-            }
-            if (Format == Format.XLSX || Format == Format.XLS)
-            {
-                ConvertTo(Format.CommaDelimited);
-            }
-            ConnectionStringBuilder = new SqlConnectionStringBuilder(ConnectionString);
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "ImportFile.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                if (!EvaluatedEntirely)
-                {
-                    EvaluateEntirely();
-                }
-
-                var localImportFilePath = Path.Combine(SqlImportFilesDropPath, UniqueIdentifier + SqlImportFileExtension);
-
-                //Create Temporary Import File
-                var importFile = IsFixedWidth ? SaveAs(Format.FileSessionImport, localImportFilePath) : Copy(localImportFilePath);
-
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@fileLocation", importFile.FullName);
-                cmd.Parameters.AddWithValue("@columnsInFile", GetColumnDeclarationStatement(Columns));
-                cmd.Parameters.AddWithValue("@fileHasColumnsNames", importFile.HasColumnHeaders);
-                cmd.Parameters.AddWithValue("@fieldDelimiter", importFile.FieldDelimeter);
-                var formatFilePathParameter = new SqlParameter
-                {
-                    ParameterName = "@formatFilePath",
-                    SqlDbType = SqlDbType.VarChar,
-                    Size = 260,
-                    Value = DBNull.Value
-                };
-                cmd.Parameters.Add(formatFilePathParameter);
-                FileInfo formatFile = null;
-                if (importFile.IsFixedWidth)
-                {
-                    var formatFilePath = Path.Combine(SqlImportFilesDropPath, UniqueIdentifier + ".xml");
-                    CreateBcpFormatFile(formatFilePath);
-                    formatFile = new FileInfo(formatFilePath);
-                    formatFilePathParameter.Value = formatFilePath;
-                }
-                cn.Open();
-                cmd.ExecuteNonQuery();
-                importFile.Delete();
-                if (formatFile != null)
-                {
-                    formatFile.Delete();
-                }
-                SqlSessionActive = true;
-                if (OnSqlSessionOpen != null)
-                {
-                    OnSqlSessionOpen();
-                }
-            }
-            finally
-            {
-                cn.Close();
-                cn.Dispose();
-            }
-        }
-
-        protected void EndSqlSession()
-        {
-            if (!SqlSessionActive)
-            {
-                return;
-            }
-            SqlSessionActive = false;
-        }
-
-        private SqlDataReader GetDataReader(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return (SqlDataReader) SqlSelect(true, query, grouplessRecordsOnly, groupId);
-        }
-
-        private DataTable GetDataTable(QueryBuilder query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            return (DataTable) SqlSelect(false, query, grouplessRecordsOnly, groupId);
-        }
-
-        private object SqlSelect(bool dataReader, QueryBuilder query, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                CreateGroupPartition(groupId, grouplessRecordsOnly, query);
-                cn.Open();
-                var selectQuery = query.Clone();
-                if (groupId != null)
-                {
-                    selectQuery.ClearWhereClause().Where("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
-                }
-                selectQuery.From(BracketWrap(UniqueIdentifier));
-                using (var command = new SqlCommand(selectQuery.ToString(), cn) { CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout })
-                {
-                    if (dataReader)
-                    {
-                        return command.ExecuteReader(CommandBehavior.CloseConnection);
-                    }
-                    else
-                    {
-                        var da = new SqlDataAdapter(command);
-                        var dt = new DataTable("QueryResults");
-                        da.Fill(dt);
-                        cn.Close();
-                        cn.Dispose();
-                        return dt;
-                    }
-                }
-            }
-            catch
-            {
-                cn.Close();
-                throw;
-            }
-            finally
-            {
-                if (!dataReader)
-                {
-                    cn.Close();
-                }
-            }
-        }
-
-        private void CreateGroupPartition(string groupId, bool grouplessRecordsOnly = false, QueryBuilder query = null)
-        {
-            if (string.IsNullOrWhiteSpace(groupId)) return;
-            var cn = new SqlConnection(ConnectionString);
-            if (query == null)
-            {
-                query = new QueryBuilder(SqlFlavor.TransactSql);
-            }
-            try
-            {
-                var releaseGroupQuery = new QueryBuilder(SqlFlavor.TransactSql)
-                    .Update(BracketWrap(UniqueIdentifier))
-                    .Set("{0} = NULL", SqlRecordGroupColumnName)
-                    .Where("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
-                using (var command = new SqlCommand(releaseGroupQuery.ToString(), cn))
-                {
-                    command.ExecuteNonQuery();
-                }
-
-                var assignGroupQuery =  query
-                    .Clone()
-                    .Update(BracketWrap(UniqueIdentifier))
-                    .Set("{0} = '{1}'", SqlRecordGroupColumnName, groupId);
-
-                if (grouplessRecordsOnly)
-                {
-                    assignGroupQuery.Where("{0} IS NULL", SqlRecordGroupColumnName);
-                }
-
-                using (var command = new SqlCommand(assignGroupQuery.ToString(), cn))
-                {
-                    command.ExecuteNonQuery();
-                }
-            }
-            finally
-            {
-                cn.Close();
-            }
-            
-        }
-
-        protected DataTable GetSqlSchema(QueryBuilder query)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                cn.Open();
-                var schemaTable = new DataTable();
-                var schemaQuery = new QueryBuilder(query.Flavor);
-                schemaQuery
-                    .Select(query.SelectClause)
-                    .Limit(1)
-                    .From(WrapWithBrackets(UniqueIdentifier))
-                    .Where("1 = 2");
-                using (var command = new SqlCommand(schemaQuery.ToString(), cn))
-                {
-                    var da = new SqlDataAdapter(command);
-                    da.FillSchema(schemaTable, SchemaType.Source);
-                }
-                return schemaTable;
-            }
-            finally
-            {
-                cn.Close();
-            }
-        }
-
-        private int SqlUpdate(string groupId, QueryBuilder query, bool grouplessRecordsOnly)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "Update.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@updateClause", query.SetClause);
-                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
-                cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
-
-                cn.Open();
-                return cmd.ExecuteNonQuery();
-            }
-            finally
-            {
-                cn.Close();
-            }
-        }
-
-        private void ModifySqlSchema(string alterSchemaClause)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "AlterTable.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@alterSchemaClause", alterSchemaClause);
-                cn.Open();
-                cmd.ExecuteNonQuery();
-            }
-            finally
-            {
-                cn.Close();
-            }
-        }
-
-        private int SqlDelete(string groupId, QueryBuilder query, bool grouplessRecordsOnly)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "Delete.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = SqlCommandTimeout};
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
-                cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
-
-                cn.Open();
-                return cmd.ExecuteNonQuery();
-            }
-            finally
-            {
-                cn.Close();
-            }
-        }
-
-        private void SqlQueryToFile(string columns, QueryBuilder query, string targetFilePath,
-            string newDelimeter, bool grouplessRecordsOnly, string groupId)
-        {
-            var cn = new SqlConnection(ConnectionString);
-            try
-            {
-                var targetFile = new FileInfo(targetFilePath);
-                var delimeter = newDelimeter ?? FieldDelimeter;
-                var sqlFilePath = Path.Combine(SqlProcedureFilesPath, "QueryToFile.sql");
-                var sqlText = File.ReadAllText(sqlFilePath);
-                var cmd = new SqlCommand(sqlText, cn) {CommandType = CommandType.Text, CommandTimeout = 0};
-                cmd.CommandTimeout = SqlCommandTimeout;
-                cmd.Parameters.AddWithValue("@dbName", ConnectionStringBuilder.InitialCatalog);
-                cmd.Parameters.AddWithValue("@sessionTableId", UniqueIdentifier);
-                cmd.Parameters.AddWithValue("@groupId", groupId);
-                cmd.Parameters.AddWithValue("@columns", columns);
-                cmd.Parameters.AddWithValue("@whereClause", query.WhereClause);
-                cmd.Parameters.AddWithValue("@groupByClause", query.GroupByClause);
-                cmd.Parameters.AddWithValue("@havingClause", query.HavingClause);
-                cmd.Parameters.AddWithValue("@orderByClause", query.OrderByClause);
-                cmd.Parameters.AddWithValue("@targetFilePath", targetFilePath);
-                cmd.Parameters.AddWithValue("@fieldDelimiter", delimeter);
-                cmd.Parameters.AddWithValue("@grouplessRecordsOnly", grouplessRecordsOnly);
-                var numberOfRecordsCopied = new SqlParameter
-                {
-                    Direction = ParameterDirection.Output,
-                    DbType = DbType.Int32,
-                    ParameterName = "@numberOfRecordsCopied",
-                    Value = 0
-                };
-                cmd.Parameters.Add(numberOfRecordsCopied);
-
-                if (targetFile.Exists)
-                {
-                    targetFile.Delete();
-                }
-                cn.Open();
-                cmd.ExecuteNonQuery();
-            }
-            finally
-            {
-                cn.Close();
-                cn.Dispose();
-            }
-        }
-
-        private void SqlQueryToTable(string targetConnectionString, string targetTable, QueryBuilder query, bool grouplessRecordsOnly, string groupId = null)
-        {
-            var sourceTableConnection = new SqlConnection(ConnectionString);
-            var targetTableConnection = new SqlConnection(targetConnectionString ?? ConnectionString);
-            try
-            {
-                targetTableConnection.Open();
-                bool tableExists;
-                const string sql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = @TableId";
-                using (var command = new SqlCommand(sql, targetTableConnection))
-                {
-                    command.Parameters.AddWithValue("@TableId", targetTable);
-                    var count = Convert.ToInt32(command.ExecuteScalar());
-                    tableExists = count > 0;
-                }
-
-                if (!tableExists)
-                {
-                    sourceTableConnection.Open();
-                    var sourceTableSchema = new DataTable();
-                    var schemaQuery = new QueryBuilder(query.Flavor);
-                    schemaQuery
-                        .Select(query.SelectClause)
-                        .Limit(1)
-                        .From(WrapWithBrackets(UniqueIdentifier))
-                        .Where("1 = 2");
-                    using (var command = new SqlCommand(schemaQuery.ToString(), sourceTableConnection))
-                    {
-                        var da = new SqlDataAdapter(command);
-                        da.FillSchema(sourceTableSchema, SchemaType.Source);
-                    }
-
-                    var tableCreator = new TransactSqlTableCreator(targetTableConnection) { DestinationTableName = targetTable };
-                    tableCreator.CreateFromDataTable(sourceTableSchema);
-                }
-
-                using (var bulkCopy = new SqlBulkCopy(targetTableConnection))
-                {
-                    bulkCopy.DestinationTableName = "[" + targetTable + "]";
-                    bulkCopy.WriteToServer(GetDataReader(query,grouplessRecordsOnly,groupId));
-                }
-            }
-            finally
-            {
-                sourceTableConnection.Close();
-                targetTableConnection.Close();
-            }
-        }
-
-        private static string GetColumnDeclarationStatement(IEnumerable<Column> columns)
-        {
-            var columnsCreateStatement = new List<string>();
-            foreach (var column in columns)
-            {
-                var length = column.Length > 0 ? column.Length : 1;
-                columnsCreateStatement.Add(WrapWithBrackets(column.Name) + " CHAR(" + length + ")");
-            }
-            return string.Join(",", columnsCreateStatement);
-        }
-
-        private XmlDocument CreateBcpFormatFile()
-        {
-            const string xsiUri = "http://www.w3.org/2001/XMLSchema-instance";
-            var ff = new XmlDocument();
-            var dec = ff.CreateXmlDeclaration("1.0", null, null);
-            ff.AppendChild(dec);
-            var bcpFormat = ff.CreateElement("BCPFORMAT");
-            bcpFormat.SetAttribute("xmlns", "http://schemas.microsoft.com/sqlserver/2004/bulkload/format");
-            bcpFormat.SetAttribute("xmlns:xsi", xsiUri);
-            var record = ff.CreateElement("RECORD");
-            var row = ff.CreateElement("ROW");
-            for (var x = 0; x < Columns.Count; x++)
-            {
-                var col = Columns[x];
-                var id = (col.Index + 1).ToString();
-                var length = col.Length.ToString();
-                var column = ff.CreateElement("COLUMN");
-                column.SetAttribute("SOURCE", id);
-                column.SetAttribute("NAME", col.Name);
-                column.SetAttribute("type", xsiUri, "SQLCHAR");
-                column.SetAttribute("LENGTH", length);
-
-
-                var field = ff.CreateElement("FIELD");
-                field.SetAttribute("ID", id);
-                if (x != Columns.Count - 1)
-                {
-                    field.SetAttribute("type", xsiUri, "CharFixed");
-                    field.SetAttribute("LENGTH", length);
-                }
-                else
-                {
-                    field.SetAttribute("type", xsiUri, "CharTerm");
-                    field.SetAttribute("TERMINATOR", @"\r\n");
-                }
-
-                record.AppendChild(field);
-                row.AppendChild(column);
-            }
-            bcpFormat.AppendChild(record);
-            bcpFormat.AppendChild(row);
-            ff.AppendChild(bcpFormat);
-            return ff;
-        }
-
-        private void CreateBcpFormatFile(string saveToPath)
-        {
-            var xml = CreateBcpFormatFile();
-            xml.Save(saveToPath);
-        }
-
-        protected static string WrapWithBrackets(string columns)
-        {
-            if (!columns.Contains(",")) return BracketWrap(columns);
-            var split = columns.Split(',');
-            for (var i = 0; i < split.Length; i++)
-            {
-                split[i] = WrapWithBrackets(split[i]);
-            }
-            return String.Join(",", split);
-        }
-
-        protected static string BracketWrap(string columnName)
-        {
-            if (!columnName.EndsWith("]"))
-            {
-                columnName = "[" + columnName + "]";
-            }
-            return columnName;
-        }
-
-        #endregion
     }
 }

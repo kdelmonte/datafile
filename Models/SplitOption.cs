@@ -1,4 +1,4 @@
-﻿namespace DataFile
+﻿namespace DataFile.Models
 {
     public class SplitOption
     {

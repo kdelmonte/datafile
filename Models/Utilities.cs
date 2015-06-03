@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
 
-namespace DataFile
+namespace DataFile.Models
 {
     public static class Utilities
     {

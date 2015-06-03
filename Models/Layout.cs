@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 
-namespace DataFile
+namespace DataFile.Models
 {
     public class Layout
     {

@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace DataFile
+namespace DataFile.Models
 {
     public class Column
     {
@@ -8,17 +8,20 @@ namespace DataFile
         public int End;
         public string ExampleValue;
         public bool FixedWidthMode;
-        public List<ColumnValueFrequency> FrequencyValues = new List<ColumnValueFrequency>();
         public int Index;
         public int Start;
         private int _length;
 
         private string _name;
 
-        public Column(int index, string name)
+        public Column(string name)
+        {
+            Name = name;
+        }
+
+        public Column(int index, string name):this(name)
         {
             Index = index;
-            Name = name;
         }
 
         public Column()

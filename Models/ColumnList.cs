@@ -1,7 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 
-namespace DataFile
+namespace DataFile.Models
 {
     public sealed class ColumnList : ObservableCollection<Column>
     {
