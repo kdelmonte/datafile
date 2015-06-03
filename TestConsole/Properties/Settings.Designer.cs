@@ -32,5 +32,14 @@ namespace TestConsole.Properties {
                 return ((string)(this["ConnString"]));
             }
         }
+        
+        [global::System.Configuration.ApplicationScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("C:\\importFiles")]
+        public string ImportDirectory {
+            get {
+                return ((string)(this["ImportDirectory"]));
+            }
+        }
     }
 }

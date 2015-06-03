@@ -14,7 +14,7 @@ using Excel;
 
 namespace DataFile
 {
-    public partial class DataFileInfo
+    public partial class DataFileInfo: IDisposable
     {
         
         // Properties
@@ -145,19 +145,24 @@ namespace DataFile
 
         ~DataFileInfo()
         {
-            if (!KeepSessionOpenOnDispose)
+            try
             {
-                Close();
+                Dispose();
+            }
+            catch
+            {
+
             }
         }
 
         
         // Public Methods
         //=================================================
-        
-        public void Close()
+
+
+        public void Dispose()
         {
-            if (!DatabaseSessionActive) return;
+            if (!DatabaseSessionActive || KeepSessionOpenOnDispose) return;
             CloseDatabaseSession();
             if (OnDatabaseSessionClose != null)
             {
@@ -839,6 +844,7 @@ namespace DataFile
         {
             HasColumnHeaders = fileHasColumns;
             var sourceFile = new FileInfo(filePath);
+            if (!sourceFile.Exists) return;
             Length = sourceFile.Length;
             FullName = sourceFile.FullName;
             Name = sourceFile.Name;

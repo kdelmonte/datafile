@@ -46,7 +46,7 @@ namespace DataFile.DatabaseInterfaces
 
         public TransactSqlInterface(string connectionString, string fileImportDirectoryPath):this()
         {
-            if (string.IsNullOrWhiteSpace(ConnectionString))
+            if (string.IsNullOrWhiteSpace(connectionString))
             {
                 throw new ArgumentException("The ConnectionString must be set in order to use this operation");
             }
@@ -186,12 +186,12 @@ namespace DataFile.DatabaseInterfaces
                     sourceFile.EvaluateEntirely();
                 }
 
-                var importFilePath = !string.IsNullOrEmpty(FileImportDirectoryPath) ? sourceFile.FullName : FileImportDirectoryPath;
+                var importDirectoryPath = string.IsNullOrEmpty(FileImportDirectoryPath) ? sourceFile.DirectoryName : FileImportDirectoryPath;
 
-                var localImportFilePath = Path.Combine(importFilePath, sourceFile.UniqueIdentifier + DataFileInfo.DatabaseImportFileExtension);
+                var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.UniqueIdentifier + DataFileInfo.DatabaseImportFileExtension);
 
                 //Create Temporary Import File
-                importFile = sourceFile.IsFixedWidth ? sourceFile.SaveAs(Format.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
+                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(Format.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
 
                 var targetTableName = BracketWrap(sourceFile.UniqueIdentifier);
                 var sqlBuilder = new List<string>
@@ -205,7 +205,7 @@ namespace DataFile.DatabaseInterfaces
 
                 if (sourceFile.IsFixedWidth)
                 {
-                    var formatFilePath = Path.Combine(importFilePath, sourceFile.UniqueIdentifier + ".xml");
+                    var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.UniqueIdentifier + ".xml");
                     CreateBcpFormatFile(sourceFile.Columns, formatFilePath);
                     formatFile = new FileInfo(formatFilePath);
                     sqlBuilder.Add(string.Format("FORMATFILE = '{0}',", formatFilePath));
@@ -220,7 +220,7 @@ namespace DataFile.DatabaseInterfaces
                 sqlBuilder.Add("TABLOCK, KEEPNULLS");
                 sqlBuilder.Add(")");
 
-                sqlBuilder.Add(string.Format("ALTER TABLE '{0}'", targetTableName));
+                sqlBuilder.Add(string.Format("ALTER TABLE {0}", targetTableName));
                 sqlBuilder.Add("ADD ___RecordId INT IDENTITY (1, 1) NOT NULL, ___GroupId UNIQUEIDENTIFIER NULL");
 
                 var sqlText = string.Join(Environment.NewLine, sqlBuilder);
