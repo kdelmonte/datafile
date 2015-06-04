@@ -3,13 +3,13 @@ using System.Collections.Specialized;
 
 namespace DataFile.Models
 {
-    public sealed class ColumnList : ObservableCollection<Column>
+    public sealed class DataFileColumnList : ObservableCollection<DataFileColumn>
     {
-        public ColumnList()
+        public DataFileColumnList()
         {
         }
 
-        public ColumnList(NotifyCollectionChangedEventHandler onChange)
+        public DataFileColumnList(NotifyCollectionChangedEventHandler onChange)
         {
             CollectionChanged += onChange;
         }

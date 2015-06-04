@@ -1,15 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Data;
 using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using DataFile.DatabaseInterfaces;
 using DataFile.Models;
-using DataFile.Models.Query;
+using DataFile.Models.Database;
+using DataFile.Models.Database.Interfaces;
 using Excel;
 
 namespace DataFile
@@ -32,8 +31,7 @@ namespace DataFile
         private Layout _layout;
         public string UniqueIdentifier { get; private set; }
 
-        public ColumnList AggregatableColumns { get; set; }
-        public ColumnList Columns { get; set; }
+        public DataFileColumnList Columns { get; set; }
         public string DirectoryName { get; set; }
         public bool EvaluatedEntirely { get; set; }
         public List<string> ExcelSheets { get; set; }
@@ -118,7 +116,6 @@ namespace DataFile
             DatabaseInterface = dbInterface;
             UniqueIdentifier = Guid.NewGuid().ToString("N");
             HasColumnHeaders = true;
-            AggregatableColumns = new ColumnList();
             SampleRows = new List<List<string>>();
             Validity = new Validity();
             InitializeColumnList();
@@ -151,7 +148,8 @@ namespace DataFile
             }
             catch
             {
-
+                // We can ignore this. If this fails, it is most likely because
+                // the instance had already been destroyed by Garbage Collection.
             }
         }
 
@@ -163,7 +161,7 @@ namespace DataFile
         public void Dispose()
         {
             if (!DatabaseSessionActive || KeepSessionOpenOnDispose) return;
-            CloseDatabaseSession();
+            StopDatabaseSession();
             if (OnDatabaseSessionClose != null)
             {
                 OnDatabaseSessionClose();
@@ -183,21 +181,22 @@ namespace DataFile
             ActiveWorksheet = sheetName;
             try
             {
-                excelReader = GetExcelDataReader(true);
+                excelReader = GetExcelDataReader();
                 if (HasColumnHeaders)
                 {
                     excelReader.Read();
+
                     for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        var columnName = excelReader[x].ToString().Trim();
-                        Columns.Add(new Column(x, columnName));
+                        var columnName = ConvertToString(excelReader[x]).Trim();
+                        Columns.Add(new DataFileColumn(x, columnName));
                     }
                 }
                 else
                 {
                     for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        Columns.Add(new Column(x, DefaultColumnName + (x + 1)));
+                        Columns.Add(new DataFileColumn(x, DefaultColumnName + (x + 1)));
                     }
                 }
 
@@ -211,7 +210,7 @@ namespace DataFile
                     }
                     for (var x = 0; x < excelReader.FieldCount; x++)
                     {
-                        var value = Convert.ToString(excelReader[x]);
+                        var value = ConvertToString(excelReader[x]);
                         fieldValues.Add(value);
                     }
 
@@ -225,7 +224,7 @@ namespace DataFile
             }
         }
 
-        public void EvaluateEntirely()
+        public void EvaluateEntirelyFromDisk()
         {
             TotalRecords = 0;
             if (IsFixedWidth && Layout != null)
@@ -241,13 +240,13 @@ namespace DataFile
                 {
                     case Format.XLS:
                     case Format.XLSX:
-                        excelReader = GetExcelDataReader();
+                        excelReader = GetExcelDataReader(true);
                         while (excelReader.Read())
                         {
                             for (var x = 0; x < Columns.Count; x++)
                             {
                                 var column = Columns[x];
-                                var value = excelReader[column.Index].ToString();
+                                var value = ConvertToString(excelReader[column.Index]);
                                 if (value.Length > column.Length)
                                 {
                                     column.Length = value.Length;
@@ -263,7 +262,7 @@ namespace DataFile
                         var line = reader.ReadLine();
                         if (HasColumnHeaders)
                         {
-                            line = reader.ReadLine(); //Skip Columns
+                            line = reader.ReadLine();
                         }
                         if (line != null)
                         {
@@ -279,7 +278,6 @@ namespace DataFile
                                 {
                                     var column = Columns[x];
                                     var value = TrimQuoteDelimeters(fields[column.Index]);
-                                    //var value = fields[column.Index];
                                     if (value.Length > column.Length)
                                     {
                                         column.Length = value.Length;
@@ -389,19 +387,18 @@ namespace DataFile
             return QueryToFile(targetFilePath, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<Column> columns, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<DataFileColumn> columns, DatabaseCommand query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return QueryToFile(null, withHeaders, columns, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<Column> columns, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<DataFileColumn> columns, DatabaseCommand query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             var exportIsFixedWidth = newDelimeter != null && newDelimeter == string.Empty || IsFixedWidth;
             var overwritingCurrentFile = string.IsNullOrWhiteSpace(targetFilePath) || IsSamePath(FullName, targetFilePath);
-            OpenDatabaseSession();
-            DatabaseQueryToFile(query, targetFilePath, newDelimeter, grouplessRecordsOnly, groupId);
+            QueryToFile(query, targetFilePath, newDelimeter, grouplessRecordsOnly, groupId);
             var dataFileInfo = overwritingCurrentFile ? this : new DataFileInfo(targetFilePath, false);
             if (withHeaders)
             {
@@ -476,28 +473,6 @@ namespace DataFile
             }
         }
 
-        public void ImportIntoTable(string targetConnectionString, string targetTable, DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            OpenDatabaseSession();
-            DatabaseQueryToTable(targetConnectionString, targetTable, query, grouplessRecordsOnly, groupId);
-        }
-
-        public int UpdateRecords(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            OpenDatabaseSession();
-            var recordsUpdated = DatabaseUpdate(query, grouplessRecordsOnly, groupId);
-            UpdateFromDatabase();
-            return recordsUpdated;
-        }
-
-        public int DeleteRecords(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            OpenDatabaseSession();
-            var recordsDeleted = DatabaseDelete(query, grouplessRecordsOnly, groupId);
-            UpdateFromDatabase();
-            return recordsDeleted;
-        }
-
         public void Shuffle()
         {
             var query = CreateDatabaseCommand();
@@ -508,7 +483,6 @@ namespace DataFile
         public void CopyPropertiesFromOtherDataFile(DataFileInfo source)
         {
             HasColumnHeaders = source.HasColumnHeaders;
-            AggregatableColumns = source.AggregatableColumns;
             Layout = source.Layout;
         }
 
@@ -562,21 +536,21 @@ namespace DataFile
                 newDirectory);
         }
 
-        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+        public List<FileInfo> SplitByField(DataFileColumnList columnsWithAliases, DataFileColumnList columnsWithoutAliases,
             bool randomize, string newDirectory)
         {
             return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
                 null, newDirectory);
         }
 
-        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+        public List<FileInfo> SplitByField(DataFileColumnList columnsWithAliases, DataFileColumnList columnsWithoutAliases,
             bool randomize)
         {
             return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
                 null, null);
         }
 
-        public List<FileInfo> SplitByField(ColumnList columnsWithAliases, ColumnList columnsWithoutAliases,
+        public List<FileInfo> SplitByField(DataFileColumnList columnsWithAliases, DataFileColumnList columnsWithoutAliases,
             int maxSplits = 0, bool randomize = false, string newDirectory = null)
         {
             return Split(SplitMethod.ByField, columnsWithAliases, columnsWithoutAliases, randomize,
@@ -655,7 +629,7 @@ namespace DataFile
             IExcelDataReader excelReader = null;
             try
             {
-                excelReader = GetExcelDataReader();
+                excelReader = GetExcelDataReader(false, false);
                 ExcelSheets = new List<string>();
                 for (var x = 0; x < excelReader.ResultsCount; x++)
                 {
@@ -690,14 +664,14 @@ namespace DataFile
                 {
                     for (var i = 0; i < columns.Length; i++)
                     {
-                        Columns.Add(new Column(i, columns[i]));
+                        Columns.Add(new DataFileColumn(i, columns[i]));
                     }
                 }
                 else
                 {
                     for (var i = 0; i < columns.Length; i++)
                     {
-                        Columns.Add(new Column(i, DefaultColumnName + (i + 1)));
+                        Columns.Add(new DataFileColumn(i, DefaultColumnName + (i + 1)));
                     }
                     SampleRows.Add(columns.ToList());
                     rowCount++;
@@ -746,7 +720,7 @@ namespace DataFile
                 }
                 else
                 {
-                    Columns.Add(new Column(0, DefaultColumnName + 1));
+                    Columns.Add(new DataFileColumn(0, DefaultColumnName + 1));
                     SampleRows.Add(new List<string> { TrimQuoteDelimeters(firstLine) });
                     rowCount++;
                 }
@@ -827,8 +801,6 @@ namespace DataFile
                         {
                             column.ExampleValue = value;
                         }
-                        if (value.Length <= column.Length) continue;
-                        column.Length = value.Length;
                     }
                     Columns[x] = column;
                 }
@@ -837,7 +809,7 @@ namespace DataFile
 
         private void InitializeColumnList()
         {
-            Columns = new ColumnList(ColumnList_CollectionChanged);
+            Columns = new DataFileColumnList(ColumnList_CollectionChanged);
         }
 
         private void Initialize(string filePath, bool fileHasColumns)
@@ -890,14 +862,32 @@ namespace DataFile
             }
         }
 
-        private IExcelDataReader GetExcelDataReader(bool preventColumnRowSkip = false)
+        private IExcelDataReader GetExcelDataReader(bool skipColumnRow = false, bool onActiveWorksheet = true)
         {
             var stream = File.Open(FullName, FileMode.Open, FileAccess.Read);
             var reader = Format == Format.XLSX
                                 ? ExcelReaderFactory.CreateOpenXmlReader(stream)
                                 : ExcelReaderFactory.CreateBinaryReader(stream);
             reader.IsFirstRowAsColumnNames = HasColumnHeaders;
-            if (!preventColumnRowSkip && HasColumnHeaders)
+            if (onActiveWorksheet && !string.IsNullOrEmpty(ActiveWorksheet))
+            {
+                var foundSheet = false;
+                for (var x = 0; x < reader.ResultsCount; x++)
+                {
+                    if (reader.Name.Equals(ActiveWorksheet))
+                    {
+                        foundSheet = true;
+                        break;
+                    }
+                    reader.NextResult();
+                }
+                if (!foundSheet)
+                {
+                    throw new Exception(string.Format("The specified Excel Sheet \" {0} \" was not found", ActiveWorksheet));
+                }
+            }
+
+            if (skipColumnRow && HasColumnHeaders)
             {
                 reader.Read();
             }
@@ -1100,13 +1090,13 @@ namespace DataFile
                     {
                         case Format.XLSX:
                         case Format.XLS:
-                            excelReader = GetExcelDataReader();
+                            excelReader = GetExcelDataReader(true);
                             while (excelReader.Read())
                             {
                                 var row = new List<string>();
                                 for (var y = 0; y < Columns.Count; y++)
                                 {
-                                    var field = Convert.ToString(excelReader[y]);
+                                    var field = ConvertToString(excelReader[y]);
                                     row.Add(ModifyValueBasedOnSettings(field, newFormat, forceRemovalOfQuotes));
                                 }
                                 var rowString = string.Join(newDelimeter, row);
@@ -1173,7 +1163,7 @@ namespace DataFile
                     {
                         case Format.XLS:
                         case Format.XLSX:
-                            excelReader = GetExcelDataReader();
+                            excelReader = GetExcelDataReader(true);
                             if (excelReader != null)
                             {
                                 if (newFormat != Format.SpaceDelimited)
@@ -1189,7 +1179,7 @@ namespace DataFile
                                                 if (mapping.TargetFieldIndex != targetColumn.Index) continue;
                                                 if (Columns.Count > mapping.SourceFieldIndex)
                                                 {
-                                                    var value = excelReader[mapping.SourceFieldIndex].ToString();
+                                                    var value = ConvertToString(excelReader[mapping.SourceFieldIndex]);
                                                     row.Add(ModifyValueBasedOnSettings(value, newFormat, forceRemovalOfQuotes));
                                                     row.Add(value);
                                                     foundMap = true;
@@ -1219,7 +1209,7 @@ namespace DataFile
                                                 if (mapping.TargetFieldIndex != targetColumn.Index) continue;
                                                 if (Columns.Count > mapping.SourceFieldIndex)
                                                 {
-                                                    var value = excelReader[mapping.SourceFieldIndex].ToString();
+                                                    var value = ConvertToString(excelReader[mapping.SourceFieldIndex]);
                                                     row.Add(ModifyValueBasedOnColumnLength(targetColumn, value));
                                                     foundMap = true;
                                                 }
@@ -1439,7 +1429,7 @@ namespace DataFile
             }
         }
 
-        protected void UpdateFromDatabase()
+        protected void Pull()
         {
             QueryToFile(FullName, HasColumnHeaders);
         }
@@ -1484,7 +1474,6 @@ namespace DataFile
                 switch (splitBy)
                 {
                     case SplitMethod.ByField:
-                        file.OpenDatabaseSession();
                         var columnsWithAliases = valueA.ToString();
                         var columnsWithoutAliases = valueB.ToString();
                         sqlColString = columnsWithAliases + ", COUNT(*) AS '" + countColumnName + "'";
@@ -1499,7 +1488,7 @@ namespace DataFile
                         }
                         reader.Close();
                         query.Select(sqlColString).GroupBy(columnsWithoutAliases).OrderBy("COUNT(*)");
-                        var counts = file.GetDataTable(query);
+                        var counts = file.ToDataTable(query);
                         for (var x = 0; x < counts.Columns.Count; x++)
                         {
                             var column = counts.Columns[x];
@@ -1527,7 +1516,7 @@ namespace DataFile
                             {
                                 query.Shuffle();
                             }
-                            dr = file.GetDataReader(query);
+                            dr = file.ToDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1559,7 +1548,6 @@ namespace DataFile
                         break;
                     case SplitMethod.ByFileQuery:
                         var whereClause = valueA.ToString();
-                        file.OpenDatabaseSession();
                         targetFileName =
                             GetNextAvailableName(templateFileName.Replace(incrementPlaceHolder, increment.ToString()));
                         writer = new StreamWriter(targetFileName);
@@ -1576,7 +1564,7 @@ namespace DataFile
                         {
                             query.Shuffle();
                         }
-                        dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
+                        dr = file.ToDataReader(query, true, Guid.NewGuid().ToString("N"));
                         while (dr.Read())
                         {
                             var rowString = "";
@@ -1598,7 +1586,7 @@ namespace DataFile
                         {
                             query.Shuffle();
                         }
-                        dr = file.GetDataReader(query, true, Guid.NewGuid().ToString("N"));
+                        dr = file.ToDataReader(query, true, Guid.NewGuid().ToString("N"));
 
                         if (dr.Read())
                         {
@@ -1646,10 +1634,9 @@ namespace DataFile
                         if (randomize)
                         {
                             reader.Close();
-                            file.OpenDatabaseSession();
                             query.Shuffle();
                             
-                            dr = file.GetDataReader(query);
+                            dr = file.ToDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1739,9 +1726,8 @@ namespace DataFile
                         if (randomize)
                         {
                             reader.Close();
-                            file.OpenDatabaseSession();
                             query.Shuffle();
-                            dr = file.GetDataReader(query);
+                            dr = file.ToDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1803,7 +1789,6 @@ namespace DataFile
                         }
                         break;
                     case SplitMethod.ByPercentage:
-                        file.OpenDatabaseSession();
                         var percentage = Convert.ToDouble(valueA);
                         var partitionField = valueB.ToString();
                         var fileSplits = Convert.ToInt32(Math.Floor(100/percentage)).ToString();
@@ -1813,7 +1798,7 @@ namespace DataFile
                                        partitionField + " ORDER BY " +
                                        (randomize ? randomizer : "iFileSessionRecordId") + " DESC) AS FileGroup";
                         query.Select(sqlColString).GroupBy("FileGroup");
-                        dr = file.GetDataReader(query);
+                        dr = file.ToDataReader(query);
                         var fileGroupColumnIndex = file.Columns.Count;
                         var currGroup = "";
                         while (dr.Read())
@@ -1866,11 +1851,10 @@ namespace DataFile
                         }
                         if (randomize)
                         {
-                            file.OpenDatabaseSession();
                             calculatedMaxRecords =
                                 Convert.ToInt32(Math.Round((double) file.TotalRecords/totalParts));
                             query.Shuffle();
-                            dr = file.GetDataReader(query);
+                            dr = file.ToDataReader(query);
                             while (dr.Read())
                             {
                                 var rowString = "";
@@ -1906,10 +1890,6 @@ namespace DataFile
                         else
                         {
                             reader = File.OpenText(file.FullName);
-                            if (!file.EvaluatedEntirely)
-                            {
-                                file.EvaluateEntirely();
-                            }
                             calculatedMaxRecords = Convert.ToInt32(Math.Round((double) file.TotalRecords/totalParts));
                             if (file.HasColumnHeaders)
                             {
@@ -1995,7 +1975,7 @@ namespace DataFile
             return columnLine;
         }
 
-        protected string GetFileColumnString(Format format, IEnumerable<Column> columns)
+        protected string GetFileColumnString(Format format, IEnumerable<DataFileColumn> columns)
         {
             var columnList = columns.ToList();
             var delimeter = "";
@@ -2039,7 +2019,7 @@ namespace DataFile
             return columnLine;
         }
 
-        protected string ModifyValueBasedOnColumnLength(Column column, string value)
+        protected string ModifyValueBasedOnColumnLength(DataFileColumn column, string value)
         {
             var variance = column.Length - value.Length;
             if (variance != 0)
@@ -2153,15 +2133,6 @@ namespace DataFile
                     start = index + 1;
                 }
             }
-            //Refresh References...
-            if (Columns.Count <= 0) return;
-            for (var x = 0; x < AggregatableColumns.Count; x++)
-            {
-                if (AggregatableColumns[x].Index != -1)
-                {
-                    AggregatableColumns[x] = Columns[AggregatableColumns[x].Index];
-                }
-            }
         }
 
         private static string ConvertKeywordToPhrase(string str)
@@ -2187,6 +2158,11 @@ namespace DataFile
             }
             //Bytes
             return String.Concat(bytes, " Bytes");
+        }
+
+        private static string ConvertToString(object value)
+        {
+            return value == null ? string.Empty : value.ToString();
         }
     }
 }

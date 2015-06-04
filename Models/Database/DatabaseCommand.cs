@@ -1,8 +1,8 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using DataFile.DatabaseInterfaces;
+using DataFile.Models.Database.Interfaces;
 
-namespace DataFile.Models.Query
+namespace DataFile.Models.Database
 {
     public class DatabaseCommand
     {
@@ -13,14 +13,12 @@ namespace DataFile.Models.Query
         public List<OrderByExpression> OrderByExpressions { get; private set; }
         public List<Expression> GroupByExpressions { get; private set; }
         public List<FilterExpression> QueryFilters { get; private set; }
+        public List<ColumnModificationExpression> AlterExpressions { get; private set; }
         public DataFileInfo SourceFile { get; private set; }
         public bool Shuffling { get; private set; }
-        public bool Selecting { get; private set; }
-        public bool Deleting { get; private set; }
-        public bool Updating { get; private set; }
-        public bool Inserting { get; private set; }
         public IDatabaseInterface Interface { get; set; }
         public FilterClauseType LastFilterClauseUsed { get; private set; }
+        public DatabaseCommandMode Mode { get; set; }
 
         public string GetSelectClause()
         {
@@ -64,6 +62,7 @@ namespace DataFile.Models.Query
             OrderByExpressions = new List<OrderByExpression>();
             GroupByExpressions = new List<Expression>();
             QueryFilters = new List<FilterExpression>();
+            AlterExpressions = new List<ColumnModificationExpression>();
         }
 
         public DatabaseCommand(IDatabaseInterface dbInterface) : this()
@@ -94,15 +93,12 @@ namespace DataFile.Models.Query
                 SelectExpressions = null;
                 return this;
             }
-            Selecting = true;
-            Deleting = false;
-            Updating = false;
-            Inserting = false;
+            Mode = DatabaseCommandMode.Select;
             SelectExpressions = selectColumns.ToList();
             return this;
         }
 
-        public DatabaseCommand Select(IEnumerable<Column> selectColumns)
+        public DatabaseCommand Select(IEnumerable<DataFileColumn> selectColumns)
         {
             var expressions = selectColumns.Select(column => new Expression(column));
             return Select(expressions);
@@ -116,10 +112,7 @@ namespace DataFile.Models.Query
 
         public DatabaseCommand Delete()
         {
-            Selecting = false;
-            Deleting = true;
-            Updating = false;
-            Inserting = false;
+            Mode = DatabaseCommandMode.Delete;
             return this;
         }
 
@@ -130,10 +123,7 @@ namespace DataFile.Models.Query
                 UpdateExpressions = null;
                 return this;
             }
-            Selecting = false;
-            Deleting = false;
-            Updating = true;
-            Inserting = false;
+            Mode = DatabaseCommandMode.Update;
             UpdateExpressions = updateExpressions.ToList();
             return this;
         }
@@ -150,7 +140,7 @@ namespace DataFile.Models.Query
             return Update(new List<UpdateExpression> {expression});
         }
 
-        public DatabaseCommand Update(Column column, object value)
+        public DatabaseCommand Update(DataFileColumn column, object value)
         {
             var expression = new UpdateExpression
             {
@@ -160,9 +150,52 @@ namespace DataFile.Models.Query
             return Update(expression);
         }
 
-        public DatabaseCommand Set(Column column, object value)
+        public DatabaseCommand Set(DataFileColumn column, object value)
         {
             return Update(column, value);
+        }
+
+        public DatabaseCommand Alter(IEnumerable<ColumnModificationExpression> modificationExpressions)
+        {
+            if (modificationExpressions == null)
+            {
+                AlterExpressions = null;
+                return this;
+            }
+            Mode = DatabaseCommandMode.Alter;
+            AlterExpressions = modificationExpressions.ToList();
+            return this;
+        }
+
+        public DatabaseCommand Alter(ColumnModificationExpression modificationExpression)
+        {
+            AlterExpressions.Add(modificationExpression);
+            return Alter(AlterExpressions);
+        }
+
+        public DatabaseCommand Alter(ColumnModificationType modifcationType,string format, params object[] args)
+        {
+            var expression = new ColumnModificationExpression(modifcationType, format, args);
+            return Alter(new List<ColumnModificationExpression> { expression });
+        }
+
+        public DatabaseCommand Alter(ColumnModificationType modifcationType, DataFileColumn column)
+        {
+            var expression = new ColumnModificationExpression
+            {
+                Column = column,
+                ModificationType = modifcationType
+            };
+            return Alter(expression);
+        }
+
+        public DatabaseCommand Alter(ColumnModificationType modifcationType, List<DataFileColumn> columns)
+        {
+            foreach (var column in columns)
+            {
+                Alter(modifcationType, column);
+            }
+            return this;
         }
 
         public DatabaseCommand InsertInto(InsertIntoExpression insertIntoExpression)
@@ -172,10 +205,7 @@ namespace DataFile.Models.Query
                 InsertIntoExpression = null;
                 return this;
             }
-            Selecting = false;
-            Deleting = false;
-            Updating = false;
-            Inserting = true;
+            Mode = DatabaseCommandMode.Insert;
             InsertIntoExpression = insertIntoExpression;
             return this;
         }
@@ -220,7 +250,7 @@ namespace DataFile.Models.Query
             return this;
         }
 
-        public DatabaseCommand GroupBy(IEnumerable<Column> selectColumns)
+        public DatabaseCommand GroupBy(IEnumerable<DataFileColumn> selectColumns)
         {
             var expressions = selectColumns.Select(column => new Expression(column));
             return GroupBy(expressions);
@@ -247,7 +277,7 @@ namespace DataFile.Models.Query
             return Where(expression);
         }
 
-        public DatabaseCommand Where(Column column, ComparisonOperator comparisonOperator, object value)
+        public DatabaseCommand Where(DataFileColumn column, ComparisonOperator comparisonOperator, object value)
         {
             var expression = CreateFilterExpression(column, value, comparisonOperator);
             return Where(expression);
@@ -268,7 +298,7 @@ namespace DataFile.Models.Query
             return Having(expression);
         }
 
-        public DatabaseCommand Having(Column column, ComparisonOperator comparisonOperator, object value)
+        public DatabaseCommand Having(DataFileColumn column, ComparisonOperator comparisonOperator, object value)
         {
             var expression = CreateFilterExpression(column, value, comparisonOperator);
             return Having(expression);
@@ -288,7 +318,7 @@ namespace DataFile.Models.Query
             return And(expression);
         }
 
-        public DatabaseCommand And(Column column, ComparisonOperator comparisonOperator, object value)
+        public DatabaseCommand And(DataFileColumn column, ComparisonOperator comparisonOperator, object value)
         {
             var expression = CreateFilterExpression(column, value, comparisonOperator);
             return And(expression);
@@ -308,7 +338,7 @@ namespace DataFile.Models.Query
             return Or(expression);
         }
 
-        public DatabaseCommand Or(Column column, ComparisonOperator comparisonOperator, object value)
+        public DatabaseCommand Or(DataFileColumn column, ComparisonOperator comparisonOperator, object value)
         {
             var expression = CreateFilterExpression(column, value, comparisonOperator);
             return Or(expression);
@@ -356,7 +386,7 @@ namespace DataFile.Models.Query
             return clone;
         }
 
-        private static FilterExpression CreateFilterExpression(Column column, object value,
+        private static FilterExpression CreateFilterExpression(DataFileColumn column, object value,
             ComparisonOperator comparisonOperator)
         {
             return new FilterExpression

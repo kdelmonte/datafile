@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Data;
+﻿using System.Data;
 using System.Data.SqlClient;
-using System.IO;
-using DataFile.Models;
-using DataFile.Models.Query;
 
-namespace DataFile.DatabaseInterfaces
+namespace DataFile.Models.Database
 {
     public interface IDatabaseInterface
     {
@@ -20,7 +15,7 @@ namespace DataFile.DatabaseInterfaces
 
         void ImportFile(DataFileInfo sourceFile);
 
-        void DeleteTable(DataFileInfo sourceFile);
+        void DropTable(DataFileInfo sourceFile);
 
         SqlDataReader GetDataReader(DatabaseCommand command);
 
@@ -35,5 +30,7 @@ namespace DataFile.DatabaseInterfaces
         void QueryToFile(DatabaseCommand command, string targetFilePath, string newDelimeter);
 
         void QueryToTable(string targetConnectionString, string targetTable, DatabaseCommand command);
+
+        DataFileInformation EvaluateEntirely(DataFileInfo sourceFile);
     }
 }

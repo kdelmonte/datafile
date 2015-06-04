@@ -2,30 +2,31 @@
 
 namespace DataFile.Models
 {
-    public class Column
+    public class DataFileColumn
     {
-        public string Alias;
-        public int End;
-        public string ExampleValue;
-        public bool FixedWidthMode;
-        public int Index;
-        public int Start;
-        private int _length;
+        public string Alias { get; set; }
+        public int End { get; set; }
+        public string ExampleValue { get; set; }
+        public bool FixedWidthMode { get; set; }
+        public int Index { get; set; }
+        public int Start { get; set; }
+        private int _length = -1;
 
         private string _name;
 
-        public Column(string name)
+        public DataFileColumn()
+        {
+
+        }
+
+        public DataFileColumn(string name): this()
         {
             Name = name;
         }
 
-        public Column(int index, string name):this(name)
+        public DataFileColumn(int index, string name):this(name)
         {
             Index = index;
-        }
-
-        public Column()
-        {
         }
 
         public int Length
@@ -36,6 +37,11 @@ namespace DataFile.Models
                 _length = value;
                 PadName();
             }
+        }
+
+        public bool LengthSpecified
+        {
+            get { return _length > 0; }
         }
 
         public string Name

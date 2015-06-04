@@ -1,4 +1,4 @@
-﻿namespace DataFile.Models.Query
+﻿namespace DataFile.Models.Database
 {
     public enum FilterClauseType
     {

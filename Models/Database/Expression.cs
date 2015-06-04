@@ -1,17 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace DataFile.Models.Query
+﻿namespace DataFile.Models.Database
 {
     public class Expression
     {
-        public Column Column { get; set; }
+        public DataFileColumn Column { get; set; }
         public string Literal{ get; set; }
 
-        public Expression(Column column)
+        public Expression(DataFileColumn column)
         {
             Column = column;
         }

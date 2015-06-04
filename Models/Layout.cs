@@ -4,7 +4,7 @@ namespace DataFile.Models
 {
     public class Layout
     {
-        public ColumnList Columns = new ColumnList();
+        public DataFileColumnList Columns = new DataFileColumnList();
         public bool HasColumnHeaders;
         public string Name;
 

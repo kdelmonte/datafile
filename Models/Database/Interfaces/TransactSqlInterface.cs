@@ -5,10 +5,8 @@ using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Xml;
-using DataFile.Models;
-using DataFile.Models.Query;
 
-namespace DataFile.DatabaseInterfaces
+namespace DataFile.Models.Database.Interfaces
 {
     public class TransactSqlInterface : IDatabaseInterface
     {
@@ -58,24 +56,24 @@ namespace DataFile.DatabaseInterfaces
         {
             var builder = new List<string>();
             var limitClause = command.RowLimit == null ? "" : string.Format(" TOP {0} ", command.RowLimit);
-            if (command.Selecting)
+            switch (command.Mode)
             {
-
-                builder.Add(string.Format("SELECT{0}{1}", limitClause, BuildSelectClause(command)));
-                builder.Add(string.Format("FROM [{0}]", command.SourceFile.UniqueIdentifier));
-            }
-            else if (command.Deleting)
-            {
-                builder.Add(string.Format("DELETE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
-            }
-            else if (command.Updating)
-            {
-                builder.Add(string.Format("UPDATE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
-                builder.Add(BuildUpdateClause(command));
-            }
-            else if (command.Inserting)
-            {
-                builder.Add(string.Format("INSERT INTO {0}", BuildInsertIntoClause(command)));
+                case DatabaseCommandMode.Alter:
+                    return BuildAlterClause(command);
+                case DatabaseCommandMode.Select:
+                    builder.Add(string.Format("SELECT{0}{1}", limitClause, BuildSelectClause(command)));
+                    builder.Add(string.Format("FROM [{0}]", command.SourceFile.UniqueIdentifier));
+                    break;
+                case DatabaseCommandMode.Delete:
+                    builder.Add(string.Format("DELETE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
+                    break;
+                case DatabaseCommandMode.Update:
+                    builder.Add(string.Format("UPDATE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
+                    builder.Add(BuildUpdateClause(command));
+                    break;
+                case DatabaseCommandMode.Insert:
+                    builder.Add(string.Format("INSERT INTO {0}", BuildInsertIntoClause(command)));
+                    break;
             }
             var whereClause = BuildFilterClause(command, FilterClauseType.Where);
             if (!string.IsNullOrWhiteSpace(whereClause))
@@ -101,14 +99,14 @@ namespace DataFile.DatabaseInterfaces
                 builder.Add("ORDER BY");
                 builder.Add(orderByClause);
             }
-            return string.Join(Environment.NewLine, builder.ToArray());
+            return JoinWithNewLines(builder);
         }
 
         public string BuildSelectClause(DatabaseCommand command)
         {
             var selectClauseBuilder = command.SelectExpressions.Select(exp => BuildExpressionLiteral(exp, true)).ToList();
             if (!selectClauseBuilder.Any()) return null;
-            var selectClause = string.Join(",", selectClauseBuilder);
+            var selectClause = JoinWithCommas(selectClauseBuilder);
             return selectClause;
         }
 
@@ -116,7 +114,7 @@ namespace DataFile.DatabaseInterfaces
         {
             var updateClauseBuilder = command.UpdateExpressions.Select(BuildUpdateExpressionLiteral).ToList();
             if (!updateClauseBuilder.Any()) return null;
-            var updateClause = string.Join(",", updateClauseBuilder);
+            var updateClause = JoinWithCommas(updateClauseBuilder);
             return updateClause;
         }
 
@@ -132,8 +130,8 @@ namespace DataFile.DatabaseInterfaces
             }
             var columnClauseBuilder = command.InsertIntoExpression.ColumnExpressions.Select(columnExpression => BuildExpressionLiteral(columnExpression)).ToList();
             var valuesClauseBuilder = command.InsertIntoExpression.Values.Select(BuildValueExpression).ToList();
-            var columnClause = string.Join(",", columnClauseBuilder);
-            var valuesClause = string.Join(",", valuesClauseBuilder);
+            var columnClause = JoinWithCommas(columnClauseBuilder);
+            var valuesClause = JoinWithCommas(valuesClauseBuilder);
             var insertIntoClause = string.Format("({0}) VALUES ({1})", columnClause, valuesClause);
             return insertIntoClause;
         }
@@ -142,7 +140,7 @@ namespace DataFile.DatabaseInterfaces
         {
             var groupByClauseBuilder = command.SelectExpressions.Select(exp => BuildExpressionLiteral(exp)).ToList();
             if (!groupByClauseBuilder.Any()) return null;
-            var groupByClause = string.Join(",", groupByClauseBuilder);
+            var groupByClause = JoinWithCommas(groupByClauseBuilder);
             return groupByClause;
         }
 
@@ -154,8 +152,54 @@ namespace DataFile.DatabaseInterfaces
             }
             var orderByClauseBuilder = command.OrderByExpressions.Select(BuildOrderByExpressionLiteral).ToList();
             if (!orderByClauseBuilder.Any()) return null;
-            var orderByClause = string.Join(",", orderByClauseBuilder);
+            var orderByClause = JoinWithCommas(orderByClauseBuilder);
             return orderByClause;
+        }
+
+        public string BuildAlterClause(DatabaseCommand command)
+        {
+            var alterTableStatement = string.Format("ALTER TABLE [{0}]", command.SourceFile.UniqueIdentifier);
+            var alterClauseBuilder = new List<string>();
+            var addColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Add).ToList();
+            var deleteColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Delete).ToList();
+            var modifyColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Modify).ToList();
+
+            if (deleteColumnExpressions.Any())
+            {
+                alterClauseBuilder.Add(alterTableStatement);
+                alterClauseBuilder.Add("DROP COLUMN");
+                var columnsDeclarationBuilder = new List<string>();
+                foreach (var modifyExpression in deleteColumnExpressions)
+                {
+                    columnsDeclarationBuilder.Add(string.Format("{0}",
+                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                }
+                alterClauseBuilder.Add(JoinWithCommas(columnsDeclarationBuilder));
+            }
+            if (modifyColumnExpressions.Any())
+            {
+                var columnsDeclarationBuilder = new List<string>();
+                foreach (var modifyExpression in modifyColumnExpressions)
+                {
+                    columnsDeclarationBuilder.Add(string.Format("{0} ALTER COLUMN {1}", alterTableStatement,
+                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                }
+                alterClauseBuilder.Add(JoinWithNewLines(columnsDeclarationBuilder));
+            }
+            if (addColumnExpressions.Any())
+            {
+                alterClauseBuilder.Add(alterTableStatement);
+                alterClauseBuilder.Add("ADD");
+                var columnsDeclarationBuilder = new List<string>();
+                foreach (var modifyExpression in addColumnExpressions)
+                {
+                    columnsDeclarationBuilder.Add(string.Format("{0}",
+                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                }
+                alterClauseBuilder.Add(JoinWithCommas(columnsDeclarationBuilder));
+            }
+            var alterClause = JoinWithNewLines(alterClauseBuilder);
+            return alterClause;
         }
 
         public string BuildFilterClause(DatabaseCommand command, FilterClauseType clauseType)
@@ -171,7 +215,7 @@ namespace DataFile.DatabaseInterfaces
                         : "", BuildFilterExpressionLiteral(filterExpression)));
 
             }
-            return string.Join(Environment.NewLine, filterClauseBuilder);
+            return JoinWithNewLines(filterClauseBuilder);
         }
 
         public void ImportFile(DataFileInfo sourceFile)
@@ -181,11 +225,6 @@ namespace DataFile.DatabaseInterfaces
             DataFileInfo importFile = null;
             try
             {
-                if (!sourceFile.EvaluatedEntirely)
-                {
-                    sourceFile.EvaluateEntirely();
-                }
-
                 var importDirectoryPath = string.IsNullOrEmpty(FileImportDirectoryPath) ? sourceFile.DirectoryName : FileImportDirectoryPath;
 
                 var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.UniqueIdentifier + DataFileInfo.DatabaseImportFileExtension);
@@ -197,7 +236,7 @@ namespace DataFile.DatabaseInterfaces
                 var sqlBuilder = new List<string>
                 {
                     string.Format("CREATE TABLE {0} ({1})", targetTableName,
-                        GetColumnDeclarationStatement(sourceFile.Columns)),
+                        GetColumnsDeclarationStatement(sourceFile.Columns)),
                     string.Format("BULK INSERT {0}", targetTableName),
                     string.Format("FROM '{0}'", importFile.FullName),
                     "WITH ("
@@ -223,7 +262,7 @@ namespace DataFile.DatabaseInterfaces
                 sqlBuilder.Add(string.Format("ALTER TABLE {0}", targetTableName));
                 sqlBuilder.Add("ADD ___RecordId INT IDENTITY (1, 1) NOT NULL, ___GroupId UNIQUEIDENTIFIER NULL");
 
-                var sqlText = string.Join(Environment.NewLine, sqlBuilder);
+                var sqlText = JoinWithNewLines(sqlBuilder);
                 var cmd = new SqlCommand(sqlText, cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
 
                 cn.Open();
@@ -248,7 +287,7 @@ namespace DataFile.DatabaseInterfaces
             }
         }
 
-        public void DeleteTable(DataFileInfo sourceFile)
+        public void DropTable(DataFileInfo sourceFile)
         {
             var cn = new SqlConnection(ConnectionString);
             try
@@ -258,6 +297,55 @@ namespace DataFile.DatabaseInterfaces
 
                 cn.Open();
                 cmd.ExecuteNonQuery();
+            }
+            finally
+            {
+                cn.Close();
+            }
+        }
+
+        public DataFileInformation EvaluateEntirely(DataFileInfo sourceFile)
+        {
+            var fileInfo = new DataFileInformation();
+            var cn = new SqlConnection(ConnectionString);
+            try
+            {
+                var targetTableName = BracketWrap(sourceFile.UniqueIdentifier);
+                var sqlBuilder = new List<string> {string.Format("SELECT COUNT(*) FROM {0}", targetTableName)};
+
+                var lengthlessColumns = sourceFile.Columns.Where(column => !column.LengthSpecified).ToList();
+
+                if (lengthlessColumns.Any())
+                {
+                    sqlBuilder.Add(string.Format("SELECT"));
+                    var lengthQueryBuilder = new List<string>();
+ 
+                    foreach (var lengthlessColumn in lengthlessColumns)
+                    {
+                        lengthQueryBuilder.Add(string.Format("ISNULL(MAX(DATALENGTH({0})),0) AS {0}", BracketWrap(lengthlessColumn.Name)));
+                    }
+                    sqlBuilder.Add(JoinWithCommas(lengthQueryBuilder));
+                    sqlBuilder.Add(string.Format("FROM {0}", targetTableName));
+                }
+
+                var sqlText = JoinWithNewLines(sqlBuilder);
+                var cmd = new SqlCommand(sqlText, cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
+
+                var resultSet = new DataSet();
+                var dataAdapter = new SqlDataAdapter(cmd);
+                cn.Open();
+                dataAdapter.Fill(resultSet);
+
+                fileInfo.TotalRecords = Convert.ToInt32(resultSet.Tables[0].Rows[0][0]);
+
+                if (resultSet.Tables.Count <= 1) return fileInfo;
+                var columnLengthTable = resultSet.Tables[1];
+                var columnLengthRow = columnLengthTable.Rows[0];
+                foreach (DataColumn dtColumn in columnLengthTable.Columns)
+                {
+                    fileInfo.ColumnLengths[dtColumn.ColumnName] = Convert.ToInt32(columnLengthRow[dtColumn.ColumnName]);
+                }
+                return fileInfo;
             }
             finally
             {
@@ -449,6 +537,23 @@ namespace DataFile.DatabaseInterfaces
             return updateExpression;
         }
 
+        private static string BuildColumnModificationExpressionLiteral(ColumnModificationExpression expression)
+        {
+            if (!string.IsNullOrWhiteSpace(expression.Literal))
+            {
+                return expression.Literal;
+            }
+            switch (expression.ModificationType)
+            {
+                    case ColumnModificationType.Add:
+                    case ColumnModificationType.Modify:
+                    return GetColumnDeclarationStatement(expression.Column);
+                    case ColumnModificationType.Delete:
+                    return BracketWrap(expression.Column.Name);
+            }
+            throw new NotImplementedException("The ColumnModificationType is not supported");
+        }
+
         private static string BuildFilterExpressionLiteral(FilterExpression expression)
         {
             if (!string.IsNullOrWhiteSpace(expression.Literal))
@@ -518,18 +623,21 @@ namespace DataFile.DatabaseInterfaces
             return orderByExpression;
         }
 
-        private static string GetColumnDeclarationStatement(IEnumerable<Column> columns)
+        private static string GetColumnsDeclarationStatement(IEnumerable<DataFileColumn> columns)
         {
-            var columnsCreateStatement = new List<string>();
-            foreach (var column in columns)
-            {
-                var length = column.Length > 0 ? column.Length : 1;
-                columnsCreateStatement.Add(WrapWithBrackets(column.Name) + " CHAR(" + length + ")");
-            }
-            return string.Join(",", columnsCreateStatement);
+            var columnsCreateStatement = columns.Select(GetColumnDeclarationStatement).ToList();
+            return JoinWithCommas(columnsCreateStatement);
         }
 
-        private static XmlDocument CreateBcpFormatFile(IEnumerable<Column> columns)
+        private static string GetColumnDeclarationStatement(DataFileColumn column)
+        {
+            var length = column.Length > 0 ? column.Length : 1;
+            return column.LengthSpecified
+                ? string.Format("{0} CHAR({1})", WrapWithBrackets(column.Name), length)
+                : string.Format("{0} TEXT", WrapWithBrackets(column.Name));
+        }
+
+        private static XmlDocument CreateBcpFormatFile(IEnumerable<DataFileColumn> columns)
         {
             var columnList = columns.ToList();
             const string xsiUri = "http://www.w3.org/2001/XMLSchema-instance";
@@ -574,7 +682,7 @@ namespace DataFile.DatabaseInterfaces
             return ff;
         }
 
-        private static void CreateBcpFormatFile(IEnumerable<Column> columns, string saveToPath)
+        private static void CreateBcpFormatFile(IEnumerable<DataFileColumn> columns, string saveToPath)
         {
             var xml = CreateBcpFormatFile(columns);
             xml.Save(saveToPath);
@@ -598,6 +706,16 @@ namespace DataFile.DatabaseInterfaces
                 columnName = "[" + columnName + "]";
             }
             return columnName;
+        }
+
+        private static string JoinWithNewLines(IEnumerable<string> builder)
+        {
+            return string.Join(Environment.NewLine, builder.ToArray());
+        }
+
+        private static string JoinWithCommas(IEnumerable<string> builder)
+        {
+            return string.Join(",", builder.ToArray());
         }
     }
 }
