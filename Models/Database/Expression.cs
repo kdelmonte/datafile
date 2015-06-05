@@ -5,6 +5,11 @@
         public DataFileColumn Column { get; set; }
         public string Literal{ get; set; }
 
+        public Expression()
+        {
+           
+        }
+
         public Expression(DataFileColumn column)
         {
             Column = column;

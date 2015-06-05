@@ -634,7 +634,7 @@ namespace DataFile.Models.Database.Interfaces
             var length = column.Length > 0 ? column.Length : 1;
             return column.LengthSpecified
                 ? string.Format("{0} CHAR({1})", WrapWithBrackets(column.Name), length)
-                : string.Format("{0} TEXT", WrapWithBrackets(column.Name));
+                : string.Format("{0} VARCHAR(MAX)", WrapWithBrackets(column.Name));
         }
 
         private static XmlDocument CreateBcpFormatFile(IEnumerable<DataFileColumn> columns)

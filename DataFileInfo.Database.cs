@@ -156,7 +156,7 @@ namespace DataFile
             DatabaseInterface.ExecuteNonQuery(assignGroupQuery);
         }
 
-        private DatabaseCommand CreateDatabaseCommand()
+        public DatabaseCommand CreateDatabaseCommand()
         {
             return new DatabaseCommand(DatabaseInterface).From(this);
         }

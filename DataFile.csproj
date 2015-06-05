@@ -58,7 +58,6 @@
     <Compile Include="Models\DatabaseCommandMode.cs" />
     <Compile Include="Models\Database\ColumnModificationExpression.cs" />
     <Compile Include="Models\Database\ColumnModificationType.cs" />
-    <Compile Include="Models\Database\DropColumnExpression.cs" />
     <Compile Include="Models\Database\IDatabaseInterface.cs" />
     <Compile Include="Models\Database\Interfaces\TransactSqlInterface.cs" />
     <Compile Include="Models\BatchReader.cs" />

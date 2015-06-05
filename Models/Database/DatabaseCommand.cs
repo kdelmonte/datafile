@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using DataFile.Models.Database.Interfaces;
+using Newtonsoft.Json;
 
 namespace DataFile.Models.Database
 {
@@ -18,7 +19,7 @@ namespace DataFile.Models.Database
         public bool Shuffling { get; private set; }
         public IDatabaseInterface Interface { get; set; }
         public FilterClauseType LastFilterClauseUsed { get; private set; }
-        public DatabaseCommandMode Mode { get; set; }
+        public DatabaseCommandMode Mode { get; private set; }
 
         public string GetSelectClause()
         {
@@ -55,7 +56,7 @@ namespace DataFile.Models.Database
             return Interface.BuildFilterClause(this, FilterClauseType.Having);
         }
 
-        private DatabaseCommand()
+        public DatabaseCommand()
         {
             SelectExpressions = new List<Expression>();
             UpdateExpressions = new List<UpdateExpression>();
@@ -102,6 +103,11 @@ namespace DataFile.Models.Database
         {
             var expressions = selectColumns.Select(column => new Expression(column));
             return Select(expressions);
+        }
+
+        public DatabaseCommand Select(DataFileColumn selectColumn)
+        {
+            return Select(new List<DataFileColumn> { selectColumn });
         }
 
         public DatabaseCommand Select(string format, params object[] args)
@@ -381,8 +387,37 @@ namespace DataFile.Models.Database
 
         public DatabaseCommand Clone()
         {
-            var clone = new DatabaseCommand(Interface);
+            var serializable = new
+            {
+                RowLimit,
+                SelectExpressions,
+                UpdateExpressions,
+                InsertIntoExpression,
+                OrderByExpressions,
+                GroupByExpressions,
+                QueryFilters,
+                AlterExpressions,
+                SourceFile,
+                Shuffling,
+                LastFilterClauseUsed,
+                Mode
+            };
+            var clone = CloneObject<DatabaseCommand>(serializable);
+            clone.Interface = Interface;
+            clone.RowLimit = RowLimit;
+            clone.SourceFile = SourceFile;
+            clone.InsertIntoExpression = CloneObject<InsertIntoExpression>(InsertIntoExpression);
+            clone.Shuffling = Shuffling;
+            clone.LastFilterClauseUsed = LastFilterClauseUsed;
+            clone.Mode = Mode;
 
+            return clone;
+        }
+
+    private static T CloneObject<T>(object obj)
+        {
+            var serialized = JsonConvert.SerializeObject(obj);
+            var clone = JsonConvert.DeserializeObject<T>(serialized);
             return clone;
         }
 
