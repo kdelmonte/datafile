@@ -15,7 +15,7 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            const string fileName = "TwoMillionLeads.csv";
+            const string fileName = "OneMillionLeads.csv";
             var path = Path.Combine(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles\",fileName);
             Console.WriteLine("Processing {0}", path);
             var tSqlInterface = new TransactSqlInterface(Settings.Default.ConnString, Settings.Default.ImportDirectory)

@@ -263,7 +263,7 @@ namespace DataFile.Models.Database.Interfaces
                 sqlBuilder.Add("ADD ___RecordId INT IDENTITY (1, 1) NOT NULL, ___GroupId UNIQUEIDENTIFIER NULL");
 
                 var sqlText = JoinWithNewLines(sqlBuilder);
-                var cmd = new SqlCommand(sqlText, cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
+                var cmd = new SqlCommand(sqlText, cn) {CommandTimeout = CommandTimeout };
 
                 cn.Open();
                 cmd.ExecuteNonQuery();
@@ -293,7 +293,7 @@ namespace DataFile.Models.Database.Interfaces
             try
             {
                 var sqlText = string.Format("DROP TABLE [{0}]", sourceFile.UniqueIdentifier);
-                var cmd = new SqlCommand(sqlText, cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
+                var cmd = new SqlCommand(sqlText, cn) {CommandTimeout = CommandTimeout };
 
                 cn.Open();
                 cmd.ExecuteNonQuery();
@@ -329,7 +329,7 @@ namespace DataFile.Models.Database.Interfaces
                 }
 
                 var sqlText = JoinWithNewLines(sqlBuilder);
-                var cmd = new SqlCommand(sqlText, cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
+                var cmd = new SqlCommand(sqlText, cn) { CommandTimeout = CommandTimeout };
 
                 var resultSet = new DataSet();
                 var dataAdapter = new SqlDataAdapter(cmd);
@@ -369,7 +369,7 @@ namespace DataFile.Models.Database.Interfaces
             try
             {
                 cn.Open();
-                using (var cmd = new SqlCommand(command.ToQuery(), cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout })
+                using (var cmd = new SqlCommand(command.ToQuery(), cn) {CommandTimeout = CommandTimeout })
                 {
                     if (dataReader)
                     {
@@ -431,7 +431,7 @@ namespace DataFile.Models.Database.Interfaces
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var cmd = new SqlCommand(command.ToQuery(), cn) { CommandType = CommandType.Text, CommandTimeout = CommandTimeout };
+                var cmd = new SqlCommand(command.ToQuery(), cn) {CommandTimeout = CommandTimeout };
                 cn.Open();
                 return cmd.ExecuteNonQuery();
             }
@@ -491,7 +491,7 @@ namespace DataFile.Models.Database.Interfaces
                     tableCreator.CreateFromDataTable(sourceTableSchema);
                 }
 
-                using (var bulkCopy = new SqlBulkCopy(targetTableConnection))
+                using (var bulkCopy = new SqlBulkCopy(targetTableConnection){BulkCopyTimeout = CommandTimeout})
                 {
                     bulkCopy.DestinationTableName = "[" + targetTable + "]";
                     bulkCopy.WriteToServer(GetDataReader(command));
