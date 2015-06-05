@@ -138,7 +138,7 @@ namespace DataFile.Models.Database.Interfaces
 
         public string BuildGroupByClause(DatabaseCommand command)
         {
-            var groupByClauseBuilder = command.SelectExpressions.Select(exp => BuildExpressionLiteral(exp)).ToList();
+            var groupByClauseBuilder = command.GroupByExpressions.Select(exp => BuildExpressionLiteral(exp)).ToList();
             if (!groupByClauseBuilder.Any()) return null;
             var groupByClause = JoinWithCommas(groupByClauseBuilder);
             return groupByClause;

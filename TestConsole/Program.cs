@@ -14,13 +14,24 @@ namespace TestConsole
     {
         static void Main(string[] args)
         {
-            const string fileName = "15SS4 OR March 2015 OR 2 of 4 Rep Non-PAVs.xlsx";
+            var start = DateTime.Now;
+            const string fileName = "TwoMillionLeads.csv";
             var path = Path.Combine(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles\",fileName);
-            var tSqlInterface = new TransactSqlInterface(Settings.Default.ConnString, Settings.Default.ImportDirectory);
+            Console.WriteLine("Processing {0}", path);
+            var tSqlInterface = new TransactSqlInterface(Settings.Default.ConnString, Settings.Default.ImportDirectory)
+            {
+                CommandTimeout = 0
+            };
             using (var fi = new DataFileInfo(path, true, tSqlInterface))
             {
                 fi.QueryToTable(Settings.Default.ConnString, fi.NameWithoutExtension);
             }
+            var end = DateTime.Now;
+            var timeElapsed = end - start;
+            Console.WriteLine("Total time elapsed: {0} hour(s), {1} minute(s), {2} second(s)", timeElapsed.TotalHours,
+                timeElapsed.TotalMinutes, timeElapsed.TotalSeconds);
+            Console.Beep();
+            Console.ReadKey();
         }
     }
 }
