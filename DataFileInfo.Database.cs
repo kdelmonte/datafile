@@ -16,7 +16,7 @@ namespace DataFile
         public static readonly DataFileColumn DatabaseRecordGroupColumn = new DataFileColumn("___GroupId");
         public bool DatabaseSessionActive { get; private set; }
 
-        protected void BeginDatabaseSession()
+        public void BeginDatabaseSession()
         {
             if (DatabaseSessionActive) return;
 
@@ -34,7 +34,7 @@ namespace DataFile
             }
         }
 
-        protected void StopDatabaseSession()
+        public void StopDatabaseSession()
         {
             if (!DatabaseSessionActive)
             {
@@ -44,7 +44,7 @@ namespace DataFile
             DatabaseSessionActive = false;
         }
 
-        private void EvaluateEntirely()
+        public void EvaluateEntirely()
         {
             BeginDatabaseSession();
             var info = DatabaseInterface.EvaluateEntirely(this);
@@ -63,112 +63,109 @@ namespace DataFile
                     columnsWithUpdatedLengths.Add(targetColumn);
                 }
 
-                var command = CreateDatabaseCommand().Alter(ColumnModificationType.Modify, columnsWithUpdatedLengths);
-                DatabaseInterface.ExecuteNonQuery(command);
+                var query = CreateQuery().Alter(ColumnModificationType.Modify, columnsWithUpdatedLengths);
+                DatabaseInterface.ExecuteNonQuery(query);
             }
             EvaluatedEntirely = true;
         }
 
-        public SqlDataReader ToDataReader(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public SqlDataReader ToDataReader(DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return (SqlDataReader)Select(true, query, grouplessRecordsOnly, groupId);
         }
 
-        public DataTable ToDataTable(DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public DataTable ToDataTable(DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return (DataTable)Select(false, query, grouplessRecordsOnly, groupId);
         }
 
-        private object Select(bool dataReader, DatabaseCommand query, bool grouplessRecordsOnly = false, string groupId = null)
+        private object Select(bool dataReader, DataFileQuery query, bool grouplessRecordsOnly = false, string groupId = null)
         {
             BeginDatabaseSession();
             CreateGroupPartition(groupId, grouplessRecordsOnly, query);
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
-            return DatabaseInterface.Select(dataReader, query);
+            var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
+            return DatabaseInterface.Select(dataReader, queryToExecute);
         }
 
-        protected DataTable GetSqlSchema(DatabaseCommand query = null)
+        public DataTable GetSqlSchema(DataFileQuery query = null)
         {
             BeginDatabaseSession();
             if (query == null)
             {
-                query = CreateDatabaseCommand();
+                query = CreateQuery();
             }
-            return DatabaseInterface.GetSchema(query);
+            var queryToExecute = PreExecuteQuery(query);
+            return DatabaseInterface.GetSchema(queryToExecute);
         }
 
-        public int Update(DatabaseCommand query, bool grouplessRecordsOnly = false, string groupId = null)
+        public int ExecuteNonQuery(DataFileQuery query, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            return ExecuteNonQuery(true, query, grouplessRecordsOnly, groupId);
+        }
+
+        private int ExecuteNonQuery(bool preExecute, DataFileQuery query, bool grouplessRecordsOnly = false, string groupId = null)
         {
             BeginDatabaseSession();
             CreateGroupPartition(groupId, grouplessRecordsOnly, query);
-            var updateQuery = CreateDatabaseCommand(query);
-            ApplyGroupFilters(updateQuery, groupId, grouplessRecordsOnly);
-            return DatabaseInterface.ExecuteNonQuery(query);
+            var queryToExecute = CreateQuery(query);
+            ApplyGroupFilters(queryToExecute, groupId, grouplessRecordsOnly);
+            if (preExecute)
+            {
+                queryToExecute = PreExecuteQuery(query, grouplessRecordsOnly, groupId);
+            }
+            return DatabaseInterface.ExecuteNonQuery(queryToExecute);
         }
 
-        public int DeleteRecords(DatabaseCommand query, bool grouplessRecordsOnly = false, string groupId = null)
-        {
-            BeginDatabaseSession();
-            CreateGroupPartition(groupId, grouplessRecordsOnly, query);
-            var deleteQuery = CreateDatabaseCommand(query);
-            ApplyGroupFilters(deleteQuery, groupId, grouplessRecordsOnly);
-            return DatabaseInterface.ExecuteNonQuery(query);
-        }
-
-        public void QueryToFile(DatabaseCommand query, string targetFilePath,
+        public void QueryToFile(DataFileQuery query, string targetFilePath,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             BeginDatabaseSession();
             CreateGroupPartition(groupId, grouplessRecordsOnly, query);
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
-            DatabaseInterface.QueryToFile(selectQuery, targetFilePath, newDelimeter);
+            var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
+            DatabaseInterface.QueryToFile(queryToExecute, targetFilePath, newDelimeter);
         }
 
-        public void QueryToTable(string targetConnectionString, string targetTable, DatabaseCommand query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             BeginDatabaseSession();
             CreateGroupPartition(groupId, grouplessRecordsOnly, query);
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
-            DatabaseInterface.QueryToTable(targetConnectionString, targetTable, selectQuery);
+            var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
+            DatabaseInterface.QueryToTable(targetConnectionString, targetTable, queryToExecute);
         }
 
-        protected void AlterTableSchema(DatabaseCommand command)
-        {
-            BeginDatabaseSession();
-            var alterCommand = CreateDatabaseCommand(command);
-            DatabaseInterface.ExecuteNonQuery(alterCommand);
-        }
-
-        private void CreateGroupPartition(string groupId, bool grouplessRecordsOnly = false, DatabaseCommand query = null)
+        public void CreateGroupPartition(string groupId, bool grouplessRecordsOnly = false, DataFileQuery query = null)
         {
             if (string.IsNullOrWhiteSpace(groupId)) return;
-            var releaseGroupQuery = CreateDatabaseCommand()
+            var releaseGroupQuery = CreateQuery()
                     .Update(DatabaseRecordGroupColumn, null);
             ApplyGroupFilter(releaseGroupQuery, groupId);
             DatabaseInterface.ExecuteNonQuery(releaseGroupQuery);
 
-            var assignGroupQuery = CreateDatabaseCommand(query)
+            var assignGroupQuery = CreateQuery(query)
                 .Update(DatabaseRecordGroupColumn, groupId);
             ApplyGrouplessFilter(assignGroupQuery, grouplessRecordsOnly);
             DatabaseInterface.ExecuteNonQuery(assignGroupQuery);
         }
 
-        public DatabaseCommand CreateDatabaseCommand()
+        public DataFileQuery CreateQuery()
         {
-            return new DatabaseCommand(DatabaseInterface).From(this);
+            return new DataFileQuery(this, DatabaseInterface);
         }
 
-        private DatabaseCommand CreateDatabaseCommand(DatabaseCommand command)
+        private DataFileQuery CreateQuery(DataFileQuery query)
         {
-            return command == null ? CreateDatabaseCommand() : command.Clone().From(this);
+            return query == null ? CreateQuery() : query.Clone().SetSourceFile(this);
         }
 
-        private DatabaseCommand CreateSelectQuery(DatabaseCommand query)
+        private DataFileQuery CreateSelectQuery(DataFileQuery query)
         {
-            var selectQuery = CreateDatabaseCommand(query);
+            var selectQuery = CreateQuery(query);
             if (!selectQuery.SelectExpressions.Any())
             {
                 selectQuery.Select(Columns);
@@ -176,7 +173,7 @@ namespace DataFile
             return selectQuery;
         }
 
-        private static void ApplyGroupFilters(DatabaseCommand query, string groupId, bool grouplessRecordsOnly = true)
+        private static void ApplyGroupFilters(DataFileQuery query, string groupId, bool grouplessRecordsOnly = true)
         {
             if (groupId != null)
             {
@@ -188,7 +185,7 @@ namespace DataFile
             }
         }
 
-        private static void ApplyGroupFilter(DatabaseCommand query, string groupId)
+        private static void ApplyGroupFilter(DataFileQuery query, string groupId)
         {
             if (groupId != null)
             {
@@ -196,12 +193,24 @@ namespace DataFile
             }
         }
 
-        private static void ApplyGrouplessFilter(DatabaseCommand query, bool grouplessRecordsOnly = true)
+        private static void ApplyGrouplessFilter(DataFileQuery query, bool grouplessRecordsOnly = true)
         {
             if (grouplessRecordsOnly)
             {
                 query.Where(DatabaseRecordGroupColumn, ComparisonOperator.Equals, null);
             }
+        }
+
+        private DataFileQuery PreExecuteQuery(DataFileQuery queryBatch, bool grouplessRecordsOnly = false, string groupId = null)
+        {
+            var queries = queryBatch.GetQueries();
+            var last = queries.Last();
+            queries.Remove(last);
+            foreach (var query in queries)
+            {
+                ExecuteNonQuery(false, query, grouplessRecordsOnly, groupId);
+            }
+            return last;
         }
     }
 }

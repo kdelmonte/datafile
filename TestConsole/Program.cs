@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using DataFile;
+using DataFile.Models;
 using DataFile.Models.Database;
 using DataFile.Models.Database.Interfaces;
 using TestConsole.Properties;
@@ -23,10 +24,16 @@ namespace TestConsole
             {
                 CommandTimeout = 0
             };
-            using (var fi = new DataFileInfo(path, true, tSqlInterface))
+            using (var fi = new DataFileInfo(path, true, tSqlInterface){TableName = "MyFile"})
             {
-                var selectQuery = fi.CreateDatabaseCommand().Select(fi.Columns.First()).Limit(20);
-                fi.QueryToTable(Settings.Default.ConnString, fi.NameWithoutExtension, selectQuery);
+                var newColumn = new DataFileColumn("NewName");
+                var query = fi.CreateQuery()
+                    .Alter(ColumnModificationType.Add, newColumn)
+                    .Update(newColumn, "Kelvin")
+                    .Where(predicate);
+                var queryText = query.ToQueryBatch();
+                Console.WriteLine("{0} records updated",fi.ExecuteNonQuery(query));
+                //fi.QueryToTable(Settings.Default.ConnString, fi.NameWithoutExtension);
             }
             var end = DateTime.Now;
             var timeElapsed = end - start;

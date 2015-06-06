@@ -5,32 +5,24 @@ namespace DataFile.Models.Database
 {
     public interface IDatabaseInterface
     {
-        string BuildQuery(DatabaseCommand command);
-        string BuildSelectClause(DatabaseCommand command);
-        string BuildUpdateClause(DatabaseCommand command);
-        string BuildInsertIntoClause(DatabaseCommand command);
-        string BuildGroupByClause(DatabaseCommand command);
-        string BuildOrderByClause(DatabaseCommand command);
-        string BuildFilterClause(DatabaseCommand command, FilterClauseType clauseType);
-
+        string QueryBatchSeparator { get; }
+        string BuildQuery(DataFileQuery query);
+        string BuildSelectClause(DataFileQuery query);
+        string BuildUpdateClause(DataFileQuery query);
+        string BuildInsertIntoClause(DataFileQuery query);
+        string BuildGroupByClause(DataFileQuery query);
+        string BuildOrderByClause(DataFileQuery query);
+        string BuildPredicateClause(DataFileQuery query, PredicateClauseType clauseType);
+        string BuildAlterClause(DataFileQuery query);
         void ImportFile(DataFileInfo sourceFile);
-
         void DropTable(DataFileInfo sourceFile);
-
-        SqlDataReader GetDataReader(DatabaseCommand command);
-
-        DataTable GetDataTable(DatabaseCommand command);
-
-        object Select(bool dataReader, DatabaseCommand command);
-
-        DataTable GetSchema(DatabaseCommand command);
-
-        int ExecuteNonQuery(DatabaseCommand command);
-
-        void QueryToFile(DatabaseCommand command, string targetFilePath, string newDelimeter);
-
-        void QueryToTable(string targetConnectionString, string targetTable, DatabaseCommand command);
-
+        SqlDataReader GetDataReader(DataFileQuery query);
+        DataTable GetDataTable(DataFileQuery query);
+        object Select(bool dataReader, DataFileQuery query);
+        DataTable GetSchema(DataFileQuery query);
+        int ExecuteNonQuery(DataFileQuery query);
+        void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimeter);
+        void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query);
         DataFileInformation EvaluateEntirely(DataFileInfo sourceFile);
     }
 }

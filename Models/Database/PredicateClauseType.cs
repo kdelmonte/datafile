@@ -1,6 +1,6 @@
 ﻿namespace DataFile.Models.Database
 {
-    public enum FilterClauseType
+    public enum PredicateClauseType
     {
         Where = 1,
         Having = 2

@@ -29,6 +29,12 @@ namespace DataFile.Models
             Index = index;
         }
 
+        public DataFileColumn(string name, int length)
+            : this(name)
+        {
+            Length = length;
+        }
+
         public int Length
         {
             get { return _length; }

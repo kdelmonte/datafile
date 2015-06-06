@@ -33,6 +33,15 @@ namespace DataFile.Models.Database.Interfaces
                 {OrderByDirection.Desc, "DESC"}
             };
 
+        public string QueryBatchSeparator
+        {
+            get
+            {
+                return string.Format("{0}{1}{2}", Environment.NewLine + Environment.NewLine, "GO",
+                    Environment.NewLine + Environment.NewLine);
+            }
+        }
+
         public string ConnectionString { get; set; }
         public string FileImportDirectoryPath { get; set; }
         public int CommandTimeout { get; set; }
@@ -52,48 +61,49 @@ namespace DataFile.Models.Database.Interfaces
             FileImportDirectoryPath = fileImportDirectoryPath;
         }
 
-        public string BuildQuery(DatabaseCommand command)
+        public string BuildQuery(DataFileQuery query)
         {
             var builder = new List<string>();
-            var limitClause = command.RowLimit == null ? "" : string.Format(" TOP {0} ", command.RowLimit);
-            switch (command.Mode)
+            var limitClause = query.RowLimit == null ? "" : string.Format(" TOP {0} ", query.RowLimit);
+            switch (query.Mode)
             {
-                case DatabaseCommandMode.Alter:
-                    return BuildAlterClause(command);
-                case DatabaseCommandMode.Select:
-                    builder.Add(string.Format("SELECT{0}{1}", limitClause, BuildSelectClause(command)));
-                    builder.Add(string.Format("FROM [{0}]", command.SourceFile.UniqueIdentifier));
+                case DataFileQueryMode.Alter:
+                    return BuildAlterClause(query);
+                case DataFileQueryMode.Select:
+                    builder.Add(string.Format("SELECT{0}{1}", limitClause, BuildSelectClause(query)));
+                    builder.Add(string.Format("FROM [{0}]", query.SourceFile.TableName));
                     break;
-                case DatabaseCommandMode.Delete:
-                    builder.Add(string.Format("DELETE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
+                case DataFileQueryMode.Delete:
+                    builder.Add(string.Format("DELETE{0}[{1}]", limitClause, query.SourceFile.TableName));
                     break;
-                case DatabaseCommandMode.Update:
-                    builder.Add(string.Format("UPDATE{0}[{1}]", limitClause, command.SourceFile.UniqueIdentifier));
-                    builder.Add(BuildUpdateClause(command));
+                case DataFileQueryMode.Update:
+                    builder.Add(string.Format("UPDATE{0}[{1}]", limitClause, query.SourceFile.TableName));
+                    builder.Add("SET");
+                    builder.Add(BuildUpdateClause(query));
                     break;
-                case DatabaseCommandMode.Insert:
-                    builder.Add(string.Format("INSERT INTO {0}", BuildInsertIntoClause(command)));
+                case DataFileQueryMode.Insert:
+                    builder.Add(string.Format("INSERT INTO [{0}] {1}", query.SourceFile.TableName, BuildInsertIntoClause(query)));
                     break;
             }
-            var whereClause = BuildFilterClause(command, FilterClauseType.Where);
+            var whereClause = BuildPredicateClause(query, PredicateClauseType.Where);
             if (!string.IsNullOrWhiteSpace(whereClause))
             {
                 builder.Add("WHERE");
                 builder.Add(whereClause);
             }
-            var groupByClause = BuildGroupByClause(command);
+            var groupByClause = BuildGroupByClause(query);
             if (!string.IsNullOrWhiteSpace(groupByClause))
             {
                 builder.Add("GROUP BY");
                 builder.Add(groupByClause);
             }
-            var havingClause = BuildFilterClause(command, FilterClauseType.Having);
+            var havingClause = BuildPredicateClause(query, PredicateClauseType.Having);
             if (!string.IsNullOrWhiteSpace(havingClause))
             {
                 builder.Add("HAVING");
                 builder.Add(havingClause);
             }
-            var orderByClause = BuildOrderByClause(command);
+            var orderByClause = BuildOrderByClause(query);
             if (!string.IsNullOrWhiteSpace(orderByClause))
             {
                 builder.Add("ORDER BY");
@@ -102,67 +112,67 @@ namespace DataFile.Models.Database.Interfaces
             return JoinWithNewLines(builder);
         }
 
-        public string BuildSelectClause(DatabaseCommand command)
+        public string BuildSelectClause(DataFileQuery query)
         {
-            var selectClauseBuilder = command.SelectExpressions.Select(exp => BuildExpressionLiteral(exp, true)).ToList();
+            var selectClauseBuilder = query.SelectExpressions.Select(exp => BuildExpressionLiteral(exp, true)).ToList();
             if (!selectClauseBuilder.Any()) return null;
             var selectClause = JoinWithCommas(selectClauseBuilder);
             return selectClause;
         }
 
-        public string BuildUpdateClause(DatabaseCommand command)
+        public string BuildUpdateClause(DataFileQuery query)
         {
-            var updateClauseBuilder = command.UpdateExpressions.Select(BuildUpdateExpressionLiteral).ToList();
+            var updateClauseBuilder = query.UpdateExpressions.Select(BuildUpdateExpressionLiteral).ToList();
             if (!updateClauseBuilder.Any()) return null;
             var updateClause = JoinWithCommas(updateClauseBuilder);
             return updateClause;
         }
 
-        public string BuildInsertIntoClause(DatabaseCommand command)
+        public string BuildInsertIntoClause(DataFileQuery query)
         {
-            if (command.InsertIntoExpression == null)
+            if (query.InsertIntoExpression == null)
             {
                 return null;
             }
-            if (!string.IsNullOrWhiteSpace(command.InsertIntoExpression.Literal))
+            if (!string.IsNullOrWhiteSpace(query.InsertIntoExpression.Literal))
             {
-                return command.InsertIntoExpression.Literal;
+                return query.InsertIntoExpression.Literal;
             }
-            var columnClauseBuilder = command.InsertIntoExpression.ColumnExpressions.Select(columnExpression => BuildExpressionLiteral(columnExpression)).ToList();
-            var valuesClauseBuilder = command.InsertIntoExpression.Values.Select(BuildValueExpression).ToList();
+            var columnClauseBuilder = query.InsertIntoExpression.ColumnExpressions.Select(columnExpression => BuildExpressionLiteral(columnExpression)).ToList();
+            var valuesClauseBuilder = query.InsertIntoExpression.Values.Select(BuildValueExpression).ToList();
             var columnClause = JoinWithCommas(columnClauseBuilder);
             var valuesClause = JoinWithCommas(valuesClauseBuilder);
             var insertIntoClause = string.Format("({0}) VALUES ({1})", columnClause, valuesClause);
             return insertIntoClause;
         }
 
-        public string BuildGroupByClause(DatabaseCommand command)
+        public string BuildGroupByClause(DataFileQuery query)
         {
-            var groupByClauseBuilder = command.GroupByExpressions.Select(exp => BuildExpressionLiteral(exp)).ToList();
+            var groupByClauseBuilder = query.GroupByExpressions.Select(exp => BuildExpressionLiteral(exp)).ToList();
             if (!groupByClauseBuilder.Any()) return null;
             var groupByClause = JoinWithCommas(groupByClauseBuilder);
             return groupByClause;
         }
 
-        public string BuildOrderByClause(DatabaseCommand command)
+        public string BuildOrderByClause(DataFileQuery query)
         {
-            if (command.Shuffling)
+            if (query.Shuffling)
             {
                 return "NEWID()";
             }
-            var orderByClauseBuilder = command.OrderByExpressions.Select(BuildOrderByExpressionLiteral).ToList();
+            var orderByClauseBuilder = query.OrderByExpressions.Select(BuildOrderByExpressionLiteral).ToList();
             if (!orderByClauseBuilder.Any()) return null;
             var orderByClause = JoinWithCommas(orderByClauseBuilder);
             return orderByClause;
         }
 
-        public string BuildAlterClause(DatabaseCommand command)
+        public string BuildAlterClause(DataFileQuery query)
         {
-            var alterTableStatement = string.Format("ALTER TABLE [{0}]", command.SourceFile.UniqueIdentifier);
+            var alterTableStatement = string.Format("ALTER TABLE [{0}]", query.SourceFile.TableName);
             var alterClauseBuilder = new List<string>();
-            var addColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Add).ToList();
-            var deleteColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Delete).ToList();
-            var modifyColumnExpressions = command.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Modify).ToList();
+            var addColumnExpressions = query.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Add).ToList();
+            var deleteColumnExpressions = query.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Delete).ToList();
+            var modifyColumnExpressions = query.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Modify).ToList();
 
             if (deleteColumnExpressions.Any())
             {
@@ -202,20 +212,20 @@ namespace DataFile.Models.Database.Interfaces
             return alterClause;
         }
 
-        public string BuildFilterClause(DatabaseCommand command, FilterClauseType clauseType)
+        public string BuildPredicateClause(DataFileQuery query, PredicateClauseType clauseType)
         {
-            var filters = command.GetQueryFiltersByTargetClause(clauseType);
-            if (!filters.Any()) return null;
-            var filterClauseBuilder = new List<string>();
-            foreach (var filterExpression in filters)
+            var predicates = query.GetPredicatesByTargetClause(clauseType);
+            if (!predicates.Any()) return null;
+            var predicateClauseBuilder = new List<string>();
+            foreach (var predicate in predicates)
             {
-                filterClauseBuilder.Add(string.Format("{0}{1}",
-                    filterClauseBuilder.Any()
-                        ? ConjunctionOperatorDictionary[filterExpression.ConjunctionOperator] + " "
-                        : "", BuildFilterExpressionLiteral(filterExpression)));
+                predicateClauseBuilder.Add(string.Format("{0}({1})",
+                    predicateClauseBuilder.Any()
+                        ? ConjunctionOperatorDictionary[predicate.ConjunctionOperator] + " "
+                        : "", BuildPredicateLiteral(predicate)));
 
             }
-            return JoinWithNewLines(filterClauseBuilder);
+            return JoinWithNewLines(predicateClauseBuilder);
         }
 
         public void ImportFile(DataFileInfo sourceFile)
@@ -227,12 +237,12 @@ namespace DataFile.Models.Database.Interfaces
             {
                 var importDirectoryPath = string.IsNullOrEmpty(FileImportDirectoryPath) ? sourceFile.DirectoryName : FileImportDirectoryPath;
 
-                var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.UniqueIdentifier + DataFileInfo.DatabaseImportFileExtension);
+                var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + DataFileInfo.DatabaseImportFileExtension);
 
                 //Create Temporary Import File
                 importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(Format.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
 
-                var targetTableName = BracketWrap(sourceFile.UniqueIdentifier);
+                var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string>
                 {
                     string.Format("CREATE TABLE {0} ({1})", targetTableName,
@@ -244,7 +254,7 @@ namespace DataFile.Models.Database.Interfaces
 
                 if (sourceFile.IsFixedWidth)
                 {
-                    var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.UniqueIdentifier + ".xml");
+                    var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + ".xml");
                     CreateBcpFormatFile(sourceFile.Columns, formatFilePath);
                     formatFile = new FileInfo(formatFilePath);
                     sqlBuilder.Add(string.Format("FORMATFILE = '{0}',", formatFilePath));
@@ -292,7 +302,7 @@ namespace DataFile.Models.Database.Interfaces
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlText = string.Format("DROP TABLE [{0}]", sourceFile.UniqueIdentifier);
+                var sqlText = string.Format("DROP TABLE [{0}]", sourceFile.TableName);
                 var cmd = new SqlCommand(sqlText, cn) {CommandTimeout = CommandTimeout };
 
                 cn.Open();
@@ -310,7 +320,7 @@ namespace DataFile.Models.Database.Interfaces
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var targetTableName = BracketWrap(sourceFile.UniqueIdentifier);
+                var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string> {string.Format("SELECT COUNT(*) FROM {0}", targetTableName)};
 
                 var lengthlessColumns = sourceFile.Columns.Where(column => !column.LengthSpecified).ToList();
@@ -353,23 +363,23 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public SqlDataReader GetDataReader(DatabaseCommand command)
+        public SqlDataReader GetDataReader(DataFileQuery query)
         {
-            return (SqlDataReader)Select(true, command);
+            return (SqlDataReader)Select(true, query);
         }
 
-        public DataTable GetDataTable(DatabaseCommand command)
+        public DataTable GetDataTable(DataFileQuery query)
         {
-            return (DataTable)Select(false, command);
+            return (DataTable)Select(false, query);
         }
 
-        public object Select(bool dataReader, DatabaseCommand command)
+        public object Select(bool dataReader, DataFileQuery query)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
                 cn.Open();
-                using (var cmd = new SqlCommand(command.ToQuery(), cn) {CommandTimeout = CommandTimeout })
+                using (var cmd = new SqlCommand(query.ToQuery(), cn) {CommandTimeout = CommandTimeout })
                 {
                     if (dataReader)
                     {
@@ -400,18 +410,17 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public DataTable GetSchema(DatabaseCommand command)
+        public DataTable GetSchema(DataFileQuery query)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
                 cn.Open();
                 var schemaTable = new DataTable();
-                var schemaQuery = new DatabaseCommand(command.Interface);
+                var schemaQuery = new DataFileQuery(query.SourceFile, query.Interface);
                 schemaQuery
-                    .Select(command.SelectExpressions)
+                    .Select(query.SelectExpressions)
                     .Limit(1)
-                    .From(command.SourceFile)
                     .Where("1 = 2");
                 using (var cmd = new SqlCommand(schemaQuery.ToQuery(), cn))
                 {
@@ -426,12 +435,12 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public int ExecuteNonQuery(DatabaseCommand command)
+        public int ExecuteNonQuery(DataFileQuery query)
         {
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var cmd = new SqlCommand(command.ToQuery(), cn) {CommandTimeout = CommandTimeout };
+                var cmd = new SqlCommand(query.ToQuery(), cn) {CommandTimeout = CommandTimeout };
                 cn.Open();
                 return cmd.ExecuteNonQuery();
             }
@@ -441,7 +450,7 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public void QueryToFile(DatabaseCommand command, string targetFilePath, string newDelimeter)
+        public void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimeter)
         {
             var cn = new SqlConnection(ConnectionString);
             try
@@ -455,7 +464,7 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public void QueryToTable(string targetConnectionString, string targetTable, DatabaseCommand command)
+        public void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query)
         {
             var sourceTableConnection = new SqlConnection(ConnectionString);
             var targetTableConnection = new SqlConnection(targetConnectionString ?? ConnectionString);
@@ -475,11 +484,10 @@ namespace DataFile.Models.Database.Interfaces
                 {
                     sourceTableConnection.Open();
                     var sourceTableSchema = new DataTable();
-                    var schemaQuery = new DatabaseCommand(command.Interface);
+                    var schemaQuery = new DataFileQuery(query.SourceFile, query.Interface);
                     schemaQuery
-                        .Select(command.SelectExpressions)
+                        .Select(query.SelectExpressions)
                         .Limit(1)
-                        .From(command.SourceFile)
                         .Where("1 = 2");
                     using (var cmd = new SqlCommand(schemaQuery.ToQuery(), sourceTableConnection))
                     {
@@ -494,7 +502,7 @@ namespace DataFile.Models.Database.Interfaces
                 using (var bulkCopy = new SqlBulkCopy(targetTableConnection){BulkCopyTimeout = CommandTimeout})
                 {
                     bulkCopy.DestinationTableName = "[" + targetTable + "]";
-                    bulkCopy.WriteToServer(GetDataReader(command));
+                    bulkCopy.WriteToServer(GetDataReader(query));
                 }
             }
             finally
@@ -554,7 +562,34 @@ namespace DataFile.Models.Database.Interfaces
             throw new NotImplementedException("The ColumnModificationType is not supported");
         }
 
-        private static string BuildFilterExpressionLiteral(FilterExpression expression)
+        private static string BuildPredicateLiteral(DataFileQueryPredicate predicate)
+        {
+            var predicateGroupBuilder = new List<string>();
+            foreach (var expression in predicate.PredicateExpressions)
+            {
+                if (expression is DataFileQueryPredicate)
+                {
+                    var childPredicate = (DataFileQueryPredicate) expression;
+                    predicateGroupBuilder.Add(string.Format("{0}({1})",
+                        predicateGroupBuilder.Any()
+                            ? ConjunctionOperatorDictionary[childPredicate.ConjunctionOperator] + " "
+                            : "", BuildPredicateLiteral(childPredicate)));
+                }
+                else
+                {
+                    var predicateExpression = (PredicateExpression) expression;
+                    predicateGroupBuilder.Add(string.Format("{0}{1}",
+                        predicateGroupBuilder.Any()
+                            ? ConjunctionOperatorDictionary[predicateExpression.ConjunctionOperator] + " "
+                            : "", BuildPredicateExpressionLiteral(predicateExpression)));
+                }
+
+
+            }
+            return JoinWithSpaces(predicateGroupBuilder);
+        }
+
+        private static string BuildPredicateExpressionLiteral(PredicateExpression expression)
         {
             if (!string.IsNullOrWhiteSpace(expression.Literal))
             {
@@ -568,12 +603,12 @@ namespace DataFile.Models.Database.Interfaces
                 comparisonOperator = "IS";
             }
 
-            var filterExpression = string.Format("{0} {1} {2}",
+            var predicate = string.Format("{0} {1} {2}",
                 BuildExpressionLiteral(expression.ColumnExpression),
                 comparisonOperator,
                 valueLiteral
                 );
-            return filterExpression;
+            return predicate;
         }
 
         private static string BuildValueExpression(object value)
@@ -588,7 +623,7 @@ namespace DataFile.Models.Database.Interfaces
             }
 
             var type = value.GetType();
-            switch (type.Name)
+            switch (type.FullName)
             {
                 case "System.Byte":
                 case "System.Int16":
@@ -603,7 +638,7 @@ namespace DataFile.Models.Database.Interfaces
                 case "System.DateTime":
                 case "System.Char":
                 case "System.String":
-                    return string.Format("{0}", value);
+                    return string.Format("'{0}'", value);
                 default:
                     throw new Exception("Unsupported value expression type");
             }
@@ -716,6 +751,11 @@ namespace DataFile.Models.Database.Interfaces
         private static string JoinWithCommas(IEnumerable<string> builder)
         {
             return string.Join(",", builder.ToArray());
+        }
+
+        private static string JoinWithSpaces(IEnumerable<string> builder)
+        {
+            return string.Join(" ", builder.ToArray());
         }
     }
 }

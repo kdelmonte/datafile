@@ -29,7 +29,7 @@ namespace DataFile
         private const string DefaultColumnName = "Column";
         public int TotalRecords { get; private set; }
         private Layout _layout;
-        public string UniqueIdentifier { get; private set; }
+        public string TableName { get; set; }
 
         public DataFileColumnList Columns { get; set; }
         public string DirectoryName { get; set; }
@@ -114,7 +114,7 @@ namespace DataFile
         public DataFileInfo(IDatabaseInterface dbInterface = null)
         {
             DatabaseInterface = dbInterface;
-            UniqueIdentifier = Guid.NewGuid().ToString("N");
+            TableName = Guid.NewGuid().ToString("N");
             HasColumnHeaders = true;
             SampleRows = new List<List<string>>();
             Validity = new Validity();
@@ -370,30 +370,30 @@ namespace DataFile
             }
         }
 
-        public DataFileInfo QueryToFile(DatabaseCommand query = null, string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public DataFileInfo QueryToFile(DataFileQuery query = null, string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return QueryToFile(null, HasColumnHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(bool withHeaders, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(bool withHeaders, DataFileQuery query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return QueryToFile(null, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, DataFileQuery query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return QueryToFile(targetFilePath, withHeaders, null, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<DataFileColumn> columns, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(bool withHeaders, IEnumerable<DataFileColumn> columns, DataFileQuery query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return QueryToFile(null, withHeaders, columns, query, newDelimeter, grouplessRecordsOnly, groupId);
         }
 
-        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<DataFileColumn> columns, DatabaseCommand query = null,
+        public DataFileInfo QueryToFile(string targetFilePath, bool withHeaders, IEnumerable<DataFileColumn> columns, DataFileQuery query = null,
             string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             var exportIsFixedWidth = newDelimeter != null && newDelimeter == string.Empty || IsFixedWidth;
@@ -424,13 +424,7 @@ namespace DataFile
                 writer.Close();
                 reader.Close();
                 File.Copy(tempfile, FullName, true);
-                try
-                {
-                    File.Delete(tempfile);
-                }
-                catch
-                {
-                }
+                File.Delete(tempfile);
                 HasColumnHeaders = true;
             }
             finally
@@ -475,7 +469,7 @@ namespace DataFile
 
         public void Shuffle()
         {
-            var query = CreateDatabaseCommand();
+            var query = CreateQuery();
             query.Shuffle();
             QueryToFile(query);
         }
@@ -557,19 +551,19 @@ namespace DataFile
                 maxSplits, newDirectory);
         }
 
-        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, bool randomize, string newDirectory)
+        public List<FileInfo> SplitByFileQuery(DataFileQuery query, bool randomize, string newDirectory)
         {
             return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 null, newDirectory);
         }
 
-        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, bool randomize)
+        public List<FileInfo> SplitByFileQuery(DataFileQuery query, bool randomize)
         {
             return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 null, null);
         }
 
-        public List<FileInfo> SplitByFileQuery(DatabaseCommand query, int maxSplits = 0, bool randomize = false, string newDirectory = null)
+        public List<FileInfo> SplitByFileQuery(DataFileQuery query, int maxSplits = 0, bool randomize = false, string newDirectory = null)
         {
             return Split(SplitMethod.ByFileQuery, query, null, randomize,
                 maxSplits, newDirectory);
@@ -1453,7 +1447,7 @@ namespace DataFile
                     newDirectory += @"\";
                 }
             }
-            var query = CreateDatabaseCommand();
+            var query = CreateQuery();
             var fileList = new List<string>();
             const string partSuffix = "_Part";
             const string incrementPlaceHolder = "[increment]";
