@@ -17,7 +17,7 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            const string fileName = "15SS4 OR March 2015 OR 2 of 4 Rep Non-PAVs.xlsx";
+            const string fileName = "EightMillionLeadsWide.csv";
             var path = Path.Combine(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles\",fileName);
             Console.WriteLine("Processing {0}", path);
             var tSqlInterface = new TransactSqlInterface(Settings.Default.ConnString, Settings.Default.ImportDirectory)
@@ -26,14 +26,7 @@ namespace TestConsole
             };
             using (var fi = new DataFileInfo(path, true, tSqlInterface){TableName = "MyFile"})
             {
-                var newColumn = new DataFileColumn("NewName");
-                var query = fi.CreateQuery()
-                    .Alter(ColumnModificationType.Add, newColumn)
-                    .Update(newColumn, "Kelvin")
-                    .Where(predicate);
-                var queryText = query.ToQueryBatch();
-                Console.WriteLine("{0} records updated",fi.ExecuteNonQuery(query));
-                //fi.QueryToTable(Settings.Default.ConnString, fi.NameWithoutExtension);
+                fi.BeginDatabaseSession();
             }
             var end = DateTime.Now;
             var timeElapsed = end - start;

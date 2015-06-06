@@ -70,14 +70,14 @@ namespace DataFile.Models.Database.Interfaces
                 case DataFileQueryMode.Alter:
                     return BuildAlterClause(query);
                 case DataFileQueryMode.Select:
-                    builder.Add(string.Format("SELECT{0}{1}", limitClause, BuildSelectClause(query)));
+                    builder.Add(string.Format("SELECT{0} {1}", limitClause, BuildSelectClause(query)));
                     builder.Add(string.Format("FROM [{0}]", query.SourceFile.TableName));
                     break;
                 case DataFileQueryMode.Delete:
-                    builder.Add(string.Format("DELETE{0}[{1}]", limitClause, query.SourceFile.TableName));
+                    builder.Add(string.Format("DELETE{0} [{1}]", limitClause, query.SourceFile.TableName));
                     break;
                 case DataFileQueryMode.Update:
-                    builder.Add(string.Format("UPDATE{0}[{1}]", limitClause, query.SourceFile.TableName));
+                    builder.Add(string.Format("UPDATE{0} [{1}]", limitClause, query.SourceFile.TableName));
                     builder.Add("SET");
                     builder.Add(BuildUpdateClause(query));
                     break;
