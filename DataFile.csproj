@@ -91,30 +91,14 @@
     <Compile Include="Models\Validity.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="SqlSessionProcedures\SqlServer\AlterTable.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\Delete.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\GetSchema.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\ImportFile.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\QueryToFile.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\QueryToTable.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\Select.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="SqlSessionProcedures\SqlServer\Update.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <None Include="SqlSessionProcedures\SqlServer\AlterTable.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\Delete.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\GetSchema.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\ImportFile.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\QueryToFile.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\QueryToTable.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\Select.sql" />
+    <None Include="SqlSessionProcedures\SqlServer\Update.sql" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
