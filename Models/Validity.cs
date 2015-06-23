@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 
 namespace DataFile.Models
 {
@@ -6,11 +7,15 @@ namespace DataFile.Models
     {
         public List<string> Errors = new List<string>();
         public List<string> Warnings = new List<string>();
-        private bool valid = true;
 
         public bool Valid
         {
-            get { return valid; }
+            get { return !Errors.Any(); }
+        }
+
+        public bool HasWarnings
+        {
+            get { return Warnings.Any(); }
         }
 
         public void AddError(string error)
@@ -19,7 +24,6 @@ namespace DataFile.Models
             {
                 Errors.Add(error);
             }
-            valid = Errors.Count == 0;
         }
 
         public void AddWarning(string warning)

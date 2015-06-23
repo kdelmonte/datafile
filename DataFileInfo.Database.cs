@@ -14,7 +14,7 @@ namespace DataFile
         public static readonly string DatabaseImportFileExtension = ".fsimport";
         public static readonly DataFileColumn DatabaseRecordIdColumn = new DataFileColumn("___RecordId");
         public static readonly DataFileColumn DatabaseRecordGroupColumn = new DataFileColumn("___GroupId");
-        public bool DatabaseSessionActive { get; private set; }
+        public bool DatabaseSessionActive { get; set; }
 
         public void BeginDatabaseSession()
         {

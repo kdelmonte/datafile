@@ -11,6 +11,8 @@ namespace DataFile.Models
         public int Index { get; set; }
         public int Start { get; set; }
         private int _length = -1;
+        public string Pattern { get; set; }
+        public int? MaxLength { get; set; }
 
         private string _name;
 

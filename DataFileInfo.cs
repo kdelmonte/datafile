@@ -8,7 +8,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using DataFile.Models;
 using DataFile.Models.Database;
-using DataFile.Models.Database.Interfaces;
 using Excel;
 
 namespace DataFile
@@ -84,6 +83,11 @@ namespace DataFile
         public bool Exists
         {
             get { return File.Exists(FullName); }
+        }
+
+        public bool IsEmpty
+        {
+            get { return SampleRows.Count == 0; }
         }
 
         public string ActiveWorksheet { get; private set; }
@@ -818,41 +822,31 @@ namespace DataFile
             NameWithoutExtension = Path.GetFileNameWithoutExtension(FullName);
             Extension = sourceFile.Extension;
             var extension = Extension.ToLower().Replace(".", "");
-            try
+            switch (extension)
             {
-                switch (extension)
-                {
-                    case "xls":
-                    case "xlsx":
-                        Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
-                        InitializeExcelFile();
-                        break;
-                    default:
-                        InitializeDelimitedFile();
-                        break;
-                }
-
-                if (SampleRows.Count == 0)
-                {
-                    Validity.AddWarning("File is empty");
-                }
-                foreach (var column in Columns.Where(column => column.Length == 0))
-                {
-                    column.Length = 1;
-                }
-                FirstDataRowIndex = SampleRows.Count > 1 ? 1 : 0;
-                //Get Max Length of values in example rows
-                //Set Example Values
-                InitializeColumnProperties();
-                if (OnInitialize != null)
-                {
-                    OnInitialize();
-                }
+                case "xls":
+                case "xlsx":
+                    Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
+                    InitializeExcelFile();
+                    break;
+                default:
+                    InitializeDelimitedFile();
+                    break;
             }
-            catch (Exception ex)
+
+            if (IsEmpty)
             {
-                Validity.Errors.Clear();
-                Validity.AddError("Unexpected Error: " + ex.Message);
+                Validity.AddWarning("File is empty");
+            }
+            foreach (var column in Columns.Where(column => column.Length == 0))
+            {
+                column.Length = 1;
+            }
+            FirstDataRowIndex = SampleRows.Count > 1 ? 1 : 0;
+            InitializeColumnProperties();
+            if (OnInitialize != null)
+            {
+                OnInitialize();
             }
         }
 
