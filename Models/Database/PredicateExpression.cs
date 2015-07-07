@@ -17,7 +17,7 @@ namespace DataFile.Models.Database
             ComparisonOperator = ComparisonOperator.Equals;
         }
 
-        public PredicateExpression(DataFileColumn column, ComparisonOperator comparisonOperator, object value)
+        public PredicateExpression(DataFileColumn column, ComparisonOperator comparisonOperator, object value): this()
         {
             ColumnExpression = new Expression(column);
             Value = value;
@@ -25,10 +25,8 @@ namespace DataFile.Models.Database
         }
 
         public PredicateExpression(string columnName, ComparisonOperator comparisonOperator, object value)
+            : this(new DataFileColumn(columnName), comparisonOperator, value)
         {
-            ColumnExpression = new Expression(new DataFileColumn(columnName));
-            Value = value;
-            ComparisonOperator = comparisonOperator;
         }
 
         public PredicateExpression(string format, params object[] args)
