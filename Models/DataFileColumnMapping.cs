@@ -1,17 +1,17 @@
 ﻿namespace DataFile.Models
 {
-    public class ColumnMapping
+    public class DataFileColumnMapping
     {
         public int SourceFieldIndex;
         public int TargetFieldIndex;
 
-        public ColumnMapping(int sourceIndex, int targetIndex)
+        public DataFileColumnMapping(int sourceIndex, int targetIndex)
         {
             SourceFieldIndex = sourceIndex;
             TargetFieldIndex = targetIndex;
         }
 
-        public ColumnMapping()
+        public DataFileColumnMapping()
         {
         }
     }

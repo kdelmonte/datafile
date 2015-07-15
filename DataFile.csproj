@@ -65,13 +65,14 @@
     <Compile Include="Models\BatchReader.cs" />
     <Compile Include="Models\DataFileColumn.cs" />
     <Compile Include="Models\DataFileColumnList.cs" />
-    <Compile Include="Models\ColumnMapping.cs" />
+    <Compile Include="Models\DataFileColumnMapping.cs" />
     <Compile Include="DataFileInfo.cs" />
     <Compile Include="DataFileInfo.Database.cs" />
     <Compile Include="Models\DataFileInformation.cs" />
+    <Compile Include="Models\DataFileReader.cs" />
     <Compile Include="Models\DirectorySummary.cs" />
-    <Compile Include="Models\Format.cs" />
-    <Compile Include="Models\Layout.cs" />
+    <Compile Include="Models\DataFileFormat.cs" />
+    <Compile Include="Models\DataFileLayout.cs" />
     <Compile Include="Models\Database\Expression.cs" />
     <Compile Include="Models\Database\PredicateClauseType.cs" />
     <Compile Include="Models\Database\ComparisonOperator.cs" />

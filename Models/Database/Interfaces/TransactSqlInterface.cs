@@ -240,7 +240,7 @@ namespace DataFile.Models.Database.Interfaces
                 var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + DataFileInfo.DatabaseImportFileExtension);
 
                 //Create Temporary Import File
-                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(Format.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
+                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(DataFileFormat.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
 
                 var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string>

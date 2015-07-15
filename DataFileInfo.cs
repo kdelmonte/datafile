@@ -27,7 +27,7 @@ namespace DataFile
         private const int NumberOfExampleRows = 15;
         private const string DefaultColumnName = "Column";
         public int TotalRecords { get; private set; }
-        private Layout _layout;
+        private DataFileLayout _layout;
         public string TableName { get; set; }
 
         public DataFileColumnList Columns { get; set; }
@@ -48,11 +48,11 @@ namespace DataFile
         }
 
         public int FirstDataRowIndex { get; set; }
-        public Format Format { get; set; }
+        public DataFileFormat Format { get; set; }
 
         public string FormatType
         {
-            get { return ConvertKeywordToPhrase(Format.ToString()); }
+            get { return ConvertCodeToWords(Format.ToString()); }
         }
 
         public string FullName { get; set; }
@@ -60,7 +60,7 @@ namespace DataFile
 
         public bool IsFixedWidth
         {
-            get { return Format == Format.SpaceDelimited; }
+            get { return Format == DataFileFormat.SpaceDelimited; }
         }
 
         public long Length { get; set; }
@@ -92,7 +92,7 @@ namespace DataFile
 
         public string ActiveWorksheet { get; private set; }
 
-        public Layout Layout
+        public DataFileLayout Layout
         {
             get { return _layout; }
             set
@@ -137,7 +137,7 @@ namespace DataFile
             Initialize(filePath, fileHasColumns);
         }
 
-        public DataFileInfo(string source, Layout layout, IDatabaseInterface dbInterface = null)
+        public DataFileInfo(string source, DataFileLayout layout, IDatabaseInterface dbInterface = null)
             : this(dbInterface)
         {
             Layout = layout;
@@ -242,8 +242,8 @@ namespace DataFile
             {
                 switch (Format)
                 {
-                    case Format.XLS:
-                    case Format.XLSX:
+                    case DataFileFormat.XLS:
+                    case DataFileFormat.XLSX:
                         excelReader = GetExcelDataReader(true);
                         while (excelReader.Read())
                         {
@@ -311,17 +311,17 @@ namespace DataFile
             }
         }
 
-        public void ChangeLayout(Layout layout, List<ColumnMapping> mappings = null)
+        public void ChangeLayout(DataFileLayout layout, List<DataFileColumnMapping> mappings = null)
         {
             Save(Format, null, true, layout, mappings);
         }
 
-        public void ConvertTo(Format newFormat, Layout layout = null, List<ColumnMapping> mappings = null)
+        public void ConvertTo(DataFileFormat newFormat, DataFileLayout layout = null, List<DataFileColumnMapping> mappings = null)
         {
             Save(newFormat, null, true, layout, mappings);
         }
 
-        public DataFileInfo SaveAs(Format newFormat, string targetPath, bool overwrite = false, Layout layout = null, List<ColumnMapping> mappings = null)
+        public DataFileInfo SaveAs(DataFileFormat newFormat, string targetPath, bool overwrite = false, DataFileLayout layout = null, List<DataFileColumnMapping> mappings = null)
         {
             Save(newFormat, targetPath, overwrite, layout, mappings);
             var newLfi = new DataFileInfo(targetPath, Layout);
@@ -337,37 +337,37 @@ namespace DataFile
             return newLfi;
         }
 
-        public static Format GetFileFormatByDelimeter(string delimeter)
+        public static DataFileFormat GetFileFormatByDelimeter(string delimeter)
         {
             switch (delimeter)
             {
                 case "\t":
-                    return Format.TabDelimited;
+                    return DataFileFormat.TabDelimited;
                 case ",":
-                    return Format.CommaDelimited;
+                    return DataFileFormat.CommaDelimited;
                 case "|":
-                    return Format.PipeDelimited;
+                    return DataFileFormat.PipeDelimited;
                 case "":
                 case " ":
-                    return Format.SpaceDelimited;
+                    return DataFileFormat.SpaceDelimited;
                 default:
-                    return delimeter == ImportFieldDelimeter ? Format.DatabaseImport : Format.CharachterDelimited;
+                    return delimeter == ImportFieldDelimeter ? DataFileFormat.DatabaseImport : DataFileFormat.CharacterDelimited;
             }
         }
 
-        public static string GetDelimeterByFileFormat(Format format)
+        public static string GetDelimeterByFileFormat(DataFileFormat format)
         {
             switch (format)
             {
-                case Format.TabDelimited:
+                case DataFileFormat.TabDelimited:
                     return "\t";
-                case Format.CommaDelimited:
+                case DataFileFormat.CommaDelimited:
                     return  ",";
-                case Format.PipeDelimited:
+                case DataFileFormat.PipeDelimited:
                     return "|";
-                case Format.SpaceDelimited:
+                case DataFileFormat.SpaceDelimited:
                     return " ";
-                case Format.DatabaseImport:
+                case DataFileFormat.DatabaseImport:
                     return ImportFieldDelimeter;
                 default:
                     return null;
@@ -722,7 +722,7 @@ namespace DataFile
                     SampleRows.Add(new List<string> { TrimQuoteDelimeters(firstLine) });
                     rowCount++;
                 }
-                Format = Format.SpaceDelimited;
+                Format = DataFileFormat.SpaceDelimited;
                 while (rowCount < NumberOfExampleRows)
                 {
                     var row = reader.ReadLine();
@@ -826,7 +826,7 @@ namespace DataFile
             {
                 case "xls":
                 case "xlsx":
-                    Format = extension == "xlsx" ? Format.XLSX : Format.XLS;
+                    Format = extension == "xlsx" ? DataFileFormat.XLSX : DataFileFormat.XLS;
                     InitializeExcelFile();
                     break;
                 default:
@@ -850,47 +850,15 @@ namespace DataFile
             }
         }
 
-        private IExcelDataReader GetExcelDataReader(bool skipColumnRow = false, bool onActiveWorksheet = true)
-        {
-            var stream = File.Open(FullName, FileMode.Open, FileAccess.Read);
-            var reader = Format == Format.XLSX
-                                ? ExcelReaderFactory.CreateOpenXmlReader(stream)
-                                : ExcelReaderFactory.CreateBinaryReader(stream);
-            reader.IsFirstRowAsColumnNames = HasColumnHeaders;
-            if (onActiveWorksheet && !string.IsNullOrEmpty(ActiveWorksheet))
-            {
-                var foundSheet = false;
-                for (var x = 0; x < reader.ResultsCount; x++)
-                {
-                    if (reader.Name.Equals(ActiveWorksheet))
-                    {
-                        foundSheet = true;
-                        break;
-                    }
-                    reader.NextResult();
-                }
-                if (!foundSheet)
-                {
-                    throw new Exception(string.Format("The specified Excel Sheet \" {0} \" was not found", ActiveWorksheet));
-                }
-            }
-
-            if (skipColumnRow && HasColumnHeaders)
-            {
-                reader.Read();
-            }
-            return reader;
-        }
-
         protected string ModifyValueBasedOnSettings(string value)
         {
             var forceRemovalOfQuotes = false;
             switch (Format)
             {
-                case Format.SpaceDelimited:
-                case Format.DatabaseImport:
-                case Format.XLSX:
-                case Format.XLS:
+                case DataFileFormat.SpaceDelimited:
+                case DataFileFormat.DatabaseImport:
+                case DataFileFormat.XLSX:
+                case DataFileFormat.XLS:
                     forceRemovalOfQuotes = true;
                     break;
             }
@@ -902,9 +870,9 @@ namespace DataFile
             return ModifyValueBasedOnSettings(value, Format, forceRemovalOfQuotes);
         }
 
-        protected string ModifyValueBasedOnSettings(string value, Format type, bool forceRemovalOfQuotes)
+        protected string ModifyValueBasedOnSettings(string value, DataFileFormat type, bool forceRemovalOfQuotes)
         {
-            if (type != Format.SpaceDelimited)
+            if (type != DataFileFormat.SpaceDelimited)
             {
                 value = value.Trim();
             }
@@ -916,14 +884,11 @@ namespace DataFile
             return value;
         }
 
-        protected static string TrimQuoteDelimeters(string value)
-        {
-            return value.Trim('"');
-        }
+       
 
         protected string PlaceQuoteDelimetersIfNeeded(string value)
         {
-            if (Format == Format.SpaceDelimited || Format == Format.XLSX || Format == Format.XLS || HasQuoteDelimeters(value)) return value;
+            if (Format == DataFileFormat.SpaceDelimited || Format == DataFileFormat.XLSX || Format == DataFileFormat.XLS || HasQuoteDelimeters(value)) return value;
             return value.Contains(FieldDelimeter) ? "\"" + value + "\"" : value;
         }
 
@@ -934,82 +899,16 @@ namespace DataFile
             return value.StartsWith(doubleQuote) && value.EndsWith(doubleQuote);
         }
 
-        protected string[] SplitByFormat(string stringToSplit)
-        {
-            switch (Format)
-            {
-                case Format.CommaDelimited:
-                    return ParseCsvRow(stringToSplit);
-                default:
-                    return stringToSplit.Split(new[] {FieldDelimeter}, StringSplitOptions.None);
-            }
-        }
+        
 
-        protected static string[] ParseCsvRow(string r)
-        {
-            var resp = new List<string>();
-            var cont = false;
-            var cs = "";
-
-            var c = r.Split(new[] {','}, StringSplitOptions.None);
-
-            foreach (var y in c)
-            {
-                var x = y.Trim();
-
-                if (cont)
-                {
-                    // End of field
-                    if (x.EndsWith("\""))
-                    {
-                        cs += "," + x.Substring(0, x.Length - 1);
-                        resp.Add(cs);
-                        cs = "";
-                        cont = false;
-                        continue;
-                    }
-                    // Field still not ended
-                    cs += "," + x;
-                    continue;
-                }
-
-                // Start of encapsulation but comma has split it into at least next field
-                if (x.StartsWith("\"") && !x.EndsWith("\"") || x == "\"")
-                {
-                    cont = true;
-                    cs += x.Substring(1);
-                    continue;
-                }
-
-                // Fully encapsulated with no comma within
-                if (x.StartsWith("\"") && x.EndsWith("\""))
-                {
-                    if ((x.EndsWith("\"\"") && !x.EndsWith("\"\"\"")) && x != "\"\"")
-                    {
-                        cont = true;
-                        cs = x;
-                        continue;
-                    }
-
-                    resp.Add(x.Substring(1, x.Length - 2));
-                    continue;
-                }
-
-
-                // Non encapsulated complete field
-                resp.Add(x);
-            }
-
-
-            return resp.ToArray();
-        }
+        
 
         protected static bool LineIsEmpty(string line, string delimeter)
         {
             return string.IsNullOrEmpty(line) || line.Replace(delimeter, "").Trim().Length == 0;
         }
 
-        protected void Save(Format newFormat, string newFilePath, bool overwrite, Layout newFixedWidthLayout, List<ColumnMapping> mappings)
+        protected void Save(DataFileFormat newFormat, string newFilePath, bool overwrite, DataFileLayout newFixedWidthLayout, List<DataFileColumnMapping> mappings)
         {
             var replacingCurrentFile = (newFilePath == null || newFilePath.ToLower().Trim() == FullName.ToLower().Trim());
             StreamReader reader = null;
@@ -1028,14 +927,14 @@ namespace DataFile
             var eligibleForLayoutChange = mappings != null && mappings.Count > 0 && newFixedWidthLayout != null;
             switch (newFormat)
             {
-                case Format.CommaDelimited:
+                case DataFileFormat.CommaDelimited:
                     newDelimeter = ",";
                     newExtension = ".csv";
                     break;
-                case Format.TabDelimited:
+                case DataFileFormat.TabDelimited:
                     newDelimeter = "\t";
                     break;
-                case Format.SpaceDelimited:
+                case DataFileFormat.SpaceDelimited:
                     if (!eligibleForLayoutChange)
                     {
                         throw new Exception(
@@ -1044,16 +943,16 @@ namespace DataFile
                     newDelimeter = "";
                     forceRemovalOfQuotes = true;
                     break;
-                case Format.PipeDelimited:
+                case DataFileFormat.PipeDelimited:
                     newDelimeter = "|";
                     break;
-                case Format.DatabaseImport:
+                case DataFileFormat.DatabaseImport:
                     newDelimeter = ImportFieldDelimeter;
                     forceRemovalOfQuotes = true;
                     newExtension = DatabaseImportFileExtension;
                     break;
-                case Format.XLS:
-                case Format.XLSX:
+                case DataFileFormat.XLS:
+                case DataFileFormat.XLSX:
                     throw new Exception("Converting to Excel is not supported at the moment. Please use another format");
             }
             if (replacingCurrentFile)
@@ -1068,7 +967,6 @@ namespace DataFile
                 {
                     writer.WriteLine(!eligibleForLayoutChange
                         ? GetFileColumnString(newFormat, Columns)
-                        // ReSharper disable once PossibleNullReferenceException
                         : GetFileColumnString(newFormat, newFixedWidthLayout.Columns));
                 }
                 string line;
@@ -1076,8 +974,8 @@ namespace DataFile
                 {
                     switch (Format)
                     {
-                        case Format.XLSX:
-                        case Format.XLS:
+                        case DataFileFormat.XLSX:
+                        case DataFileFormat.XLS:
                             excelReader = GetExcelDataReader(true);
                             while (excelReader.Read())
                             {
@@ -1092,7 +990,7 @@ namespace DataFile
                                     writer.WriteLine(rowString);
                             }
                             break;
-                        case Format.SpaceDelimited:
+                        case DataFileFormat.SpaceDelimited:
                             reader = File.OpenText(FullName);
                             line = reader.ReadLine();
                             if (HasColumnHeaders)
@@ -1149,12 +1047,12 @@ namespace DataFile
                 {
                     switch (Format)
                     {
-                        case Format.XLS:
-                        case Format.XLSX:
+                        case DataFileFormat.XLS:
+                        case DataFileFormat.XLSX:
                             excelReader = GetExcelDataReader(true);
                             if (excelReader != null)
                             {
-                                if (newFormat != Format.SpaceDelimited)
+                                if (newFormat != DataFileFormat.SpaceDelimited)
                                 {
                                     while (excelReader.Read())
                                     {
@@ -1216,7 +1114,7 @@ namespace DataFile
                                 excelReader.Close();
                             }
                             break;
-                        case Format.SpaceDelimited:
+                        case DataFileFormat.SpaceDelimited:
                             reader = File.OpenText(FullName);
                             line = reader.ReadLine();
                             if (HasColumnHeaders)
@@ -1226,7 +1124,7 @@ namespace DataFile
 
                             if (line != null)
                             {
-                                if (newFormat != Format.SpaceDelimited)
+                                if (newFormat != DataFileFormat.SpaceDelimited)
                                 {
                                     while (line != null)
                                     {
@@ -1303,7 +1201,7 @@ namespace DataFile
 
                             if (line != null)
                             {
-                                if (newFormat != Format.SpaceDelimited)
+                                if (newFormat != DataFileFormat.SpaceDelimited)
                                 {
                                     while (line != null)
                                     {
@@ -1963,27 +1861,27 @@ namespace DataFile
             return columnLine;
         }
 
-        protected string GetFileColumnString(Format format, IEnumerable<DataFileColumn> columns)
+        protected string GetFileColumnString(DataFileFormat format, IEnumerable<DataFileColumn> columns)
         {
             var columnList = columns.ToList();
             var delimeter = "";
             switch (format)
             {
-                case Format.CommaDelimited:
+                case DataFileFormat.CommaDelimited:
                     delimeter = ",";
                     break;
-                case Format.TabDelimited:
+                case DataFileFormat.TabDelimited:
                     delimeter = "\t";
                     break;
-                case Format.PipeDelimited:
+                case DataFileFormat.PipeDelimited:
                     delimeter = "|";
                     break;
-                case Format.DatabaseImport:
+                case DataFileFormat.DatabaseImport:
                     delimeter = ImportFieldDelimeter;
                     break;
             }
             var columnLine = "";
-            if (format != Format.SpaceDelimited)
+            if (format != DataFileFormat.SpaceDelimited)
             {
                 for (var c = 0; c < columnList.Count; c++)
                 {
@@ -2123,7 +2021,7 @@ namespace DataFile
             }
         }
 
-        private static string ConvertKeywordToPhrase(string str)
+        private static string ConvertCodeToWords(string str)
         {
             return Regex.Replace(str, "(\\B[A-Z])", " $1");
         }
@@ -2147,10 +2045,6 @@ namespace DataFile
             //Bytes
             return String.Concat(bytes, " Bytes");
         }
-
-        private static string ConvertToString(object value)
-        {
-            return value == null ? string.Empty : value.ToString();
-        }
+       
     }
 }

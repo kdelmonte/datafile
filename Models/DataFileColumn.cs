@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 
 namespace DataFile.Models
 {
@@ -13,6 +14,7 @@ namespace DataFile.Models
         private int _length = -1;
         public string Pattern { get; set; }
         public int? MaxLength { get; set; }
+        public Type DataType { get; set; }
 
         private string _name;
 

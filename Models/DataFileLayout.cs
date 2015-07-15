@@ -2,19 +2,19 @@
 
 namespace DataFile.Models
 {
-    public class Layout
+    public class DataFileLayout
     {
         public DataFileColumnList Columns = new DataFileColumnList();
         public bool HasColumnHeaders;
         public string Name;
 
-        public Layout()
+        public DataFileLayout()
         {
         }
 
-        public Layout(string json)
+        public DataFileLayout(string json)
         {
-            var layout = JsonConvert.DeserializeObject<Layout>(json);
+            var layout = JsonConvert.DeserializeObject<DataFileLayout>(json);
             if (layout == null) return;
             var l = layout.GetType();
             var properties = l.GetFields();
@@ -24,7 +24,7 @@ namespace DataFile.Models
             }
         }
 
-        public Layout(string name, DataFileInfo leadFileInfo)
+        public DataFileLayout(string name, DataFileInfo leadFileInfo)
         {
             Name = name;
             Columns = leadFileInfo.Columns;
