@@ -10,8 +10,7 @@ namespace DataFile
     public partial class DataFileInfo
     {
         public string DatabaseFileImportLocation { get; set; }
-        public static readonly string ImportFieldDelimeter = "<#fin#>";
-        public static readonly string DatabaseImportFileExtension = ".fsimport";
+        
         public static readonly DataFileColumn DatabaseRecordIdColumn = new DataFileColumn("___RecordId");
         public static readonly DataFileColumn DatabaseRecordGroupColumn = new DataFileColumn("___GroupId");
         public bool DatabaseSessionActive { get; set; }
@@ -20,11 +19,11 @@ namespace DataFile
         {
             if (DatabaseSessionActive) return;
 
-            DatabaseInterface.ImportFile(this);
+            DatabaseAdapter.ImportFile(this);
 
             DatabaseSessionActive = true;
 
-            if (Columns.Any(column => !column.LengthSpecified))
+            if (Layout.Columns.Any(column => !column.LengthSpecified))
             {
                 EvaluateEntirely();
             }
@@ -40,21 +39,21 @@ namespace DataFile
             {
                 return;
             }
-            DatabaseInterface.DropTable(this);
+            DatabaseAdapter.DropTable(this);
             DatabaseSessionActive = false;
         }
 
         public void EvaluateEntirely()
         {
             BeginDatabaseSession();
-            var info = DatabaseInterface.EvaluateEntirely(this);
+            var info = DatabaseAdapter.EvaluateEntirely(this);
             TotalRecords = info.TotalRecords;
             if (info.ColumnLengths.Any())
             {
                 var columnsWithUpdatedLengths = new List<DataFileColumn>();
                 foreach (var columnLengthItem in info.ColumnLengths)
                 {
-                    var targetColumn = Columns.First(column => column.Name.Equals(columnLengthItem.Key));
+                    var targetColumn = Layout.Columns.First(column => column.Name.Equals(columnLengthItem.Key));
                     targetColumn.Length = columnLengthItem.Value;
                     if (targetColumn.Length == 0)
                     {
@@ -64,12 +63,12 @@ namespace DataFile
                 }
 
                 var query = CreateQuery().Alter(ColumnModificationType.Modify, columnsWithUpdatedLengths);
-                DatabaseInterface.ExecuteNonQuery(query);
+                DatabaseAdapter.ExecuteNonQuery(query);
             }
             EvaluatedEntirely = true;
         }
 
-        public SqlDataReader ToDataReader(DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
+        public SqlDataReader ToSqlDataReader(DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             return (SqlDataReader)Select(true, query, grouplessRecordsOnly, groupId);
         }
@@ -86,7 +85,7 @@ namespace DataFile
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
             var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
-            return DatabaseInterface.Select(dataReader, queryToExecute);
+            return DatabaseAdapter.Select(dataReader, queryToExecute);
         }
 
         public DataTable GetSqlSchema(DataFileQuery query = null)
@@ -97,7 +96,7 @@ namespace DataFile
                 query = CreateQuery();
             }
             var queryToExecute = PreExecuteQuery(query);
-            return DatabaseInterface.GetSchema(queryToExecute);
+            return DatabaseAdapter.GetSchema(queryToExecute);
         }
 
         public int ExecuteNonQuery(DataFileQuery query, bool grouplessRecordsOnly = false, string groupId = null)
@@ -115,18 +114,18 @@ namespace DataFile
             {
                 queryToExecute = PreExecuteQuery(query, grouplessRecordsOnly, groupId);
             }
-            return DatabaseInterface.ExecuteNonQuery(queryToExecute);
+            return DatabaseAdapter.ExecuteNonQuery(queryToExecute);
         }
 
         public void QueryToFile(DataFileQuery query, string targetFilePath,
-            string newDelimeter = null, bool grouplessRecordsOnly = false, string groupId = null)
+            string newDelimiter = null, bool grouplessRecordsOnly = false, string groupId = null)
         {
             BeginDatabaseSession();
             CreateGroupPartition(groupId, grouplessRecordsOnly, query);
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
             var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
-            DatabaseInterface.QueryToFile(queryToExecute, targetFilePath, newDelimeter);
+            DatabaseAdapter.QueryToFile(queryToExecute, targetFilePath, newDelimiter);
         }
 
         public void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)
@@ -136,7 +135,7 @@ namespace DataFile
             var selectQuery = CreateSelectQuery(query);
             ApplyGroupFilters(selectQuery, groupId, grouplessRecordsOnly);
             var queryToExecute = PreExecuteQuery(selectQuery, grouplessRecordsOnly, groupId);
-            DatabaseInterface.QueryToTable(targetConnectionString, targetTable, queryToExecute);
+            DatabaseAdapter.QueryToTable(targetConnectionString, targetTable, queryToExecute);
         }
 
         public void CreateGroupPartition(string groupId, bool grouplessRecordsOnly = false, DataFileQuery query = null)
@@ -145,17 +144,17 @@ namespace DataFile
             var releaseGroupQuery = CreateQuery()
                     .Update(DatabaseRecordGroupColumn, null);
             ApplyGroupFilter(releaseGroupQuery, groupId);
-            DatabaseInterface.ExecuteNonQuery(releaseGroupQuery);
+            DatabaseAdapter.ExecuteNonQuery(releaseGroupQuery);
 
             var assignGroupQuery = CreateQuery(query)
                 .Update(DatabaseRecordGroupColumn, groupId);
             ApplyGrouplessFilter(assignGroupQuery, grouplessRecordsOnly);
-            DatabaseInterface.ExecuteNonQuery(assignGroupQuery);
+            DatabaseAdapter.ExecuteNonQuery(assignGroupQuery);
         }
 
         public DataFileQuery CreateQuery()
         {
-            return new DataFileQuery(this, DatabaseInterface);
+            return new DataFileQuery(this, DatabaseAdapter);
         }
 
         private DataFileQuery CreateQuery(DataFileQuery query)
@@ -168,7 +167,7 @@ namespace DataFile
             var selectQuery = CreateQuery(query);
             if (!selectQuery.SelectExpressions.Any())
             {
-                selectQuery.Select(Columns);
+                selectQuery.Select(Layout.Columns);
             }
             return selectQuery;
         }

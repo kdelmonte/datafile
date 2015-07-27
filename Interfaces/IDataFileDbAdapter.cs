@@ -1,9 +1,11 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
+using DataFile.Models;
+using DataFile.Models.Database;
 
-namespace DataFile.Models.Database
+namespace DataFile.Interfaces
 {
-    public interface IDatabaseInterface
+    public interface IDataFileDbAdapter
     {
         string QueryBatchSeparator { get; }
         string BuildQuery(DataFileQuery query);
@@ -21,7 +23,7 @@ namespace DataFile.Models.Database
         object Select(bool dataReader, DataFileQuery query);
         DataTable GetSchema(DataFileQuery query);
         int ExecuteNonQuery(DataFileQuery query);
-        void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimeter);
+        void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimiter);
         void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query);
         DataFileInformation EvaluateEntirely(DataFileInfo sourceFile);
     }

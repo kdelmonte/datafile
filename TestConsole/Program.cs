@@ -1,13 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using DataFile;
-using DataFile.Models;
-using DataFile.Models.Database;
-using DataFile.Models.Database.Interfaces;
+using DataFile.Models.Database.Adapters;
 using TestConsole.Properties;
 
 namespace TestConsole
@@ -17,21 +12,22 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            const string fileName = "EightMillionLeadsWide.csv";
-            var path = Path.Combine(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles\",fileName);
-            Console.WriteLine("Processing {0}", path);
-            var tSqlInterface = new TransactSqlInterface(Settings.Default.ConnString, Settings.Default.ImportDirectory)
+            const string fileName = "1M";
+            var fileDirectory = new DirectoryInfo(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles");
+            var targetFile = fileDirectory.GetFiles("*" + fileName + "*").First();
+            Console.WriteLine("Processing {0}", targetFile.FullName);
+            var tSqlInterface = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
             {
                 CommandTimeout = 0
             };
-            using (var fi = new DataFileInfo(path, true, tSqlInterface){TableName = "MyFile"})
+            using (var dataFile = new DataFileInfo(targetFile.FullName, true, tSqlInterface) { TableName = fileName })
             {
-                fi.BeginDatabaseSession();
+                dataFile.BeginDatabaseSession();
             }
             var end = DateTime.Now;
             var timeElapsed = end - start;
-            Console.WriteLine("Total time elapsed: {0} hour(s), {1} minute(s), {2} second(s)", timeElapsed.TotalHours,
-                timeElapsed.TotalMinutes, timeElapsed.TotalSeconds);
+            Console.WriteLine("Total time elapsed: {0} hour(s), {1} minute(s), {2} second(s)", timeElapsed.Hours,
+                timeElapsed.Minutes, timeElapsed.Seconds);
             Console.Beep();
             Console.ReadKey();
         }

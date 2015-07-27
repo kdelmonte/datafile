@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.ComponentModel;
 
 namespace DataFile.Models
 {
@@ -7,14 +7,34 @@ namespace DataFile.Models
     {
         public string Alias { get; set; }
         public int End { get; set; }
-        public string ExampleValue { get; set; }
+        private object _exampleValue;
+
+        public object ExampleValue
+        {
+            get
+            {
+                return _exampleValue;
+            }
+            set { _exampleValue = ConvertValue(value); }
+        }
+
         public bool FixedWidthMode { get; set; }
         public int Index { get; set; }
         public int Start { get; set; }
         private int _length = -1;
         public string Pattern { get; set; }
         public int? MaxLength { get; set; }
-        public Type DataType { get; set; }
+
+        private Type _dataType;
+        public Type DataType
+        {
+            get { return _dataType; }
+            set
+            {
+                _dataType = value;
+                _exampleValue = ConvertValue(_exampleValue);
+            }
+        }
 
         private string _name;
 
@@ -71,6 +91,23 @@ namespace DataFile.Models
             {
                 _name = _name.PadRight(_length);
             }
+        }
+
+        public object ConvertValue(object value)
+        {
+            if (DataType == null) return value;
+            var rtn = Activator.CreateInstance(DataType);
+            if (value == rtn)
+            {
+                return rtn;
+            }
+            if (Convert.IsDBNull(value)) return rtn;
+            var converter = TypeDescriptor.GetConverter(value.GetType());
+            if (value.GetType() == DataType)
+            {
+                return value;
+            }
+            return converter.ConvertFrom(value);
         }
     }
 }

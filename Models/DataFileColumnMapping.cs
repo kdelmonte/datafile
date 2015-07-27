@@ -2,13 +2,13 @@
 {
     public class DataFileColumnMapping
     {
-        public int SourceFieldIndex;
-        public int TargetFieldIndex;
+        public int Source;
+        public int Target;
 
         public DataFileColumnMapping(int sourceIndex, int targetIndex)
         {
-            SourceFieldIndex = sourceIndex;
-            TargetFieldIndex = targetIndex;
+            Source = sourceIndex;
+            Target = targetIndex;
         }
 
         public DataFileColumnMapping()

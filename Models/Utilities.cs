@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using Newtonsoft.Json.Linq;
 
 namespace DataFile.Models
 {
@@ -58,6 +59,11 @@ namespace DataFile.Models
                 Console.WriteLine("Unable to calculate folder size: {0}", e.Message);
             }
             return folderSize;
+        }
+
+        public static T CloneWithSerialization<T>(object obj)
+        {
+            return JObject.FromObject(obj).ToObject<T>();
         }
     }
 }

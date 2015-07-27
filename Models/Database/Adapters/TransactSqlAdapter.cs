@@ -5,10 +5,11 @@ using System.Data.SqlClient;
 using System.IO;
 using System.Linq;
 using System.Xml;
+using DataFile.Interfaces;
 
-namespace DataFile.Models.Database.Interfaces
+namespace DataFile.Models.Database.Adapters
 {
-    public class TransactSqlInterface : IDatabaseInterface
+    public class TransactSqlAdapter : IDataFileDbAdapter
     {
         private const string NullValueLiteral = "NULL";
         static readonly Dictionary<ConjunctionOperator, string> ConjunctionOperatorDictionary = new Dictionary<ConjunctionOperator, string>
@@ -46,12 +47,12 @@ namespace DataFile.Models.Database.Interfaces
         public string FileImportDirectoryPath { get; set; }
         public int CommandTimeout { get; set; }
 
-        private TransactSqlInterface()
+        private TransactSqlAdapter()
         {
             CommandTimeout = 30;
         }
 
-        public TransactSqlInterface(string connectionString, string fileImportDirectoryPath):this()
+        public TransactSqlAdapter(string connectionString, string fileImportDirectoryPath):this()
         {
             if (string.IsNullOrWhiteSpace(connectionString))
             {
@@ -240,13 +241,13 @@ namespace DataFile.Models.Database.Interfaces
                 var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + DataFileInfo.DatabaseImportFileExtension);
 
                 //Create Temporary Import File
-                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(DataFileFormat.DatabaseImport, localImportFilePath) : sourceFile.Copy(localImportFilePath);
+                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(DataFileFormat.DatabaseImport, localImportFilePath, true) : sourceFile.Copy(localImportFilePath);
 
                 var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string>
                 {
                     string.Format("CREATE TABLE {0} ({1})", targetTableName,
-                        GetColumnsDeclarationStatement(sourceFile.Columns)),
+                        GetColumnsDeclarationStatement(sourceFile.Layout.Columns)),
                     string.Format("BULK INSERT {0}", targetTableName),
                     string.Format("FROM '{0}'", importFile.FullName),
                     "WITH ("
@@ -255,17 +256,17 @@ namespace DataFile.Models.Database.Interfaces
                 if (sourceFile.IsFixedWidth)
                 {
                     var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + ".xml");
-                    CreateBcpFormatFile(sourceFile.Columns, formatFilePath);
+                    CreateBcpFormatFile(sourceFile.Layout.Columns, formatFilePath);
                     formatFile = new FileInfo(formatFilePath);
                     sqlBuilder.Add(string.Format("FORMATFILE = '{0}',", formatFilePath));
                     sqlBuilder.Add("ROWTERMINATOR = '\\r\\n',");
                 }
                 else
                 {
-                    sqlBuilder.Add(string.Format("FIELDTERMINATOR = '{0}',", importFile.FieldDelimeter));
+                    sqlBuilder.Add(string.Format("FIELDTERMINATOR = '{0}',", importFile.Layout.FieldDelimiter));
                     sqlBuilder.Add("ROWTERMINATOR = '\\n',");
                 }
-                sqlBuilder.Add(string.Format("FIRSTROW = {0},", sourceFile.HasColumnHeaders ? 2 : 1));
+                sqlBuilder.Add(string.Format("FIRSTROW = {0},", sourceFile.Layout.HasColumnHeaders ? 2 : 1));
                 sqlBuilder.Add("TABLOCK, KEEPNULLS");
                 sqlBuilder.Add(")");
 
@@ -323,7 +324,7 @@ namespace DataFile.Models.Database.Interfaces
                 var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string> {string.Format("SELECT COUNT(*) FROM {0}", targetTableName)};
 
-                var lengthlessColumns = sourceFile.Columns.Where(column => !column.LengthSpecified).ToList();
+                var lengthlessColumns = sourceFile.Layout.Columns.Where(column => !column.LengthSpecified).ToList();
 
                 if (lengthlessColumns.Any())
                 {
@@ -450,7 +451,7 @@ namespace DataFile.Models.Database.Interfaces
             }
         }
 
-        public void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimeter)
+        public void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimiter)
         {
             var cn = new SqlConnection(ConnectionString);
             try

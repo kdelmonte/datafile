@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using DataFile.Interfaces;
 using Newtonsoft.Json;
 
 namespace DataFile.Models.Database
@@ -16,7 +17,7 @@ namespace DataFile.Models.Database
         public List<ColumnModificationExpression> AlterExpressions { get; private set; }
         public DataFileInfo SourceFile { get; set; }
         public bool Shuffling { get; private set; }
-        public IDatabaseInterface Interface { get; set; }
+        public IDataFileDbAdapter Interface { get; set; }
         public PredicateClauseType LastPredicateClauseUsed { get; private set; }
         private DataFileQueryMode _mode;
         public DataFileQueryMode Mode
@@ -109,7 +110,7 @@ namespace DataFile.Models.Database
             AlterExpressions = new List<ColumnModificationExpression>();
         }
 
-        public DataFileQuery(DataFileInfo sourceFile,IDatabaseInterface dbInterface) : this()
+        public DataFileQuery(DataFileInfo sourceFile,IDataFileDbAdapter dbInterface) : this()
         {
             SourceFile = sourceFile;
             Interface = dbInterface;

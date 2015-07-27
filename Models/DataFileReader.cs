@@ -2,18 +2,27 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
-using System.IO;
 using System.Linq;
-using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
-using Excel;
+using DataFile.Interfaces;
+using DataFile.Models.Readers;
+using Newtonsoft.Json.Linq;
 
 namespace DataFile.Models
 {
-    public class DataFileReader: IDataReader
+    public class DataFileReader: IDataFileReader
     {
-        public string TextQualifier { get; set; }
-        public DataFileInfo DataFile { get; set; }
+        public string Path { get; set; }
+        private DataFileLayout _layout;
+        public DataFileLayout Layout
+        {
+            get { return _layout; }
+            set
+            {
+                _layout = value;
+                _columnsSpecified = _layout != null && _layout.Columns != null && _layout.Columns.Any();
+            }
+        }
         public int Depth
         {
             get
@@ -25,10 +34,9 @@ namespace DataFile.Models
         {
             get
             {
-                return DataFile.Columns.Count;
+                return _values.Length;
             }
         }
-
         public bool IsClosed
         {
             get
@@ -36,7 +44,6 @@ namespace DataFile.Models
                 return !_open;
             }
         }
-
         public int RecordsAffected
         {
             get
@@ -44,11 +51,24 @@ namespace DataFile.Models
                 return -1;
             }
         }
+        public int Skip { get; set; }
 
+        public string CurrentWorksheet
+        {
+            get 
+            {
+                if (_activeReader is ExcelDataFileReader)
+                {
+                    return ((ExcelDataFileReader)_activeReader).CurrentWorksheet; 
+                }
+                return null;
+            }
+        }
 
+        public string TargetWorksheetName { get; set; }
         private bool _open;
-        private readonly bool _readingExcel;
-        private readonly object _activeReader;
+        private IDataFileReader _activeReader;
+        private bool _columnsSpecified;
         private object[] _values;
 
         public object this[string columnName]
@@ -65,80 +85,126 @@ namespace DataFile.Models
             get { return _values[columnIndex]; }
         }
 
-        public DataFileReader(DataFileInfo dataFile, bool skipColumnRow = false)
+        public DataFileReader(string path, DataFileLayout layout = null)
         {
-            DataFile = dataFile;
-            switch (DataFile.Format)
+            if (layout == null)
+            {
+                throw new ArgumentNullException("layout");
+            }
+            Path = path;
+            Layout = layout;
+        }
+
+        public void Open()
+        {
+            if (_open) return;
+            switch (Layout.Format)
             {
                 case DataFileFormat.XLS:
                 case DataFileFormat.XLSX:
-                    _activeReader = GetExcelDataReader();
-                    _readingExcel = true;
+                    _activeReader = new ExcelDataFileReader(Path, Layout){TargetWorksheetName = TargetWorksheetName};
+                    break;
+                case DataFileFormat.SpaceDelimited:
+                    _activeReader = new SpaceDelimitedDataFileReader(Path, Layout);
                     break;
                 default:
-                    _activeReader = GetFileReader();
-                    _readingExcel = false;
+                    _activeReader = new CharacterDelimitedDataFileReader(Path, Layout);
                     break;
+            }
+            _activeReader.Open();
+            if (Skip > 0)
+            {
+                var lineNumber = Skip;
+                while (lineNumber > 0 && Read())
+                {
+                    lineNumber--;
+                }
             }
             _open = true;
         }
 
-        private T GetSourceReader<T>()
-        {
-            return (T) _activeReader;
-        }
-
         public bool Read()
         {
-            var values = new List<object>();
-            bool endOfFile;
-            if (_readingExcel)
+            try
             {
-                var excelReader = GetSourceReader<IExcelDataReader>();
-                endOfFile = !excelReader.Read();
-                if (!endOfFile)
+                var result = _activeReader.Read();
+                var values = new object[_columnsSpecified ? Layout.Columns.Count : _activeReader.FieldCount];
+                if (result)
                 {
-                    foreach (var column in DataFile.Columns)
+                    if (_columnsSpecified)
                     {
-                        var value = ConvertToString(excelReader[column.Index]);
-                        values.Add(value);
+                        for (var index = 0; index < _activeReader.FieldCount; index++)
+                        {
+                            object value = null;
+                            if (index < Layout.Columns.Count)
+                            {
+                                var textValue = _activeReader[index];
+                                var column = Layout.Columns[index];
+                                value = column.ConvertValue(textValue);
+                            }
+                            values[index] = value;
+                        }
                     }
+                    else
+                    {
+                        values = _activeReader.GetValues();
+                    }
+                    
                 }
+                _values = values;
+                return result;
             }
-            else
+            catch
             {
-                var reader = GetSourceReader<StreamReader>();
-                var line = reader.ReadLine();
-                endOfFile = line == null;
-                if (!endOfFile)
+                if (_activeReader == null)
                 {
-                    values.AddRange(SplitByFormat(line).Select(ConvertToString));
+                    throw new Exception("You must call Open() before attempting to read");
                 }
+                throw;
             }
-
-            _values = values.ToArray();
-            return false;
         }
 
-        public T Get<T>(object o)
+        public T As<T>()
         {
+            if (Layout == null)
+            {
+                throw new Exception("A layout is required for this method");
+            }
+            var jsonObject = new JObject();
+            foreach (var column in Layout.Columns)
+            {
+                jsonObject[column.Name] = new JObject(_values[column.Index]);
+            }
+            return jsonObject.ToObject<T>();
+        }
+
+
+        public T GetValue<T>(int columnIndex)
+        {
+            var value = _values[columnIndex];
             var rtn = default(T);
-            if (o == (object)rtn)
+            if (value == (object)rtn)
             {
                 return rtn;
             }
-            if (Convert.IsDBNull(o)) return rtn;
-            var converter = TypeDescriptor.GetConverter(o.GetType());
-            if (o is T)
+            if (Convert.IsDBNull(value)) return rtn;
+            var converter = TypeDescriptor.GetConverter(value.GetType());
+            if (value is T)
             {
-                return (T)o;
+                return (T)value;
             }
-            return (T) converter.ConvertFrom(o);
+            return (T)converter.ConvertFrom(value);
+        }
+
+        public T GetValue<T>(string columnName)
+        {
+            var columnIndex = GetColumnIndex(columnName, true);
+            return GetValue<T>(columnIndex);
         }
 
         public bool GetBoolean(int columnIndex)
         {
-            return Get<bool>(columnIndex);
+            return GetValue<bool>(columnIndex);
         }
 
         public bool GetBoolean(string columnName)
@@ -149,7 +215,7 @@ namespace DataFile.Models
 
         public byte GetByte(int columnIndex)
         {
-            return Get<byte>(columnIndex);
+            return GetValue<byte>(columnIndex);
         }
 
         public byte GetByte(string columnName)
@@ -160,7 +226,7 @@ namespace DataFile.Models
 
         public long GetBytes(int columnIndex, long fieldOffset, byte[] buffer, int bufferOffset, int length)
         {
-            var b = Encoding.UTF8.GetBytes(Get<string>(columnIndex));
+            var b = Encoding.UTF8.GetBytes(GetValue<string>(columnIndex));
 
             if (bufferOffset >= b.Length)
             {
@@ -173,7 +239,6 @@ namespace DataFile.Models
 
             return length;
         }
-
 
         public long GetBytes(string columnName, long fieldOffset, byte[] buffer, int bufferOffset, int length)
         {
@@ -183,7 +248,7 @@ namespace DataFile.Models
 
         public char GetChar(int columnIndex)
         {
-            return Get<char>(columnIndex);
+            return GetValue<char>(columnIndex);
         }
 
         public char GetChar(string columnName)
@@ -193,9 +258,8 @@ namespace DataFile.Models
         }
 
         public long GetChars(int columnIndex, long fieldOffset, char[] buffer, int bufferOffset, int length)
-
         {
-            var b = Get<string>(columnIndex).ToCharArray();
+            var b = GetValue<string>(columnIndex).ToCharArray();
 
             if (bufferOffset >= b.Length)
             {
@@ -208,7 +272,6 @@ namespace DataFile.Models
 
             return length;
         }
-
 
         public long GetChars(string columnName, long fieldOffset, char[] buffer, int bufferOffset, int length)
         {
@@ -245,7 +308,7 @@ namespace DataFile.Models
 
         public DateTime GetDateTime(int columnIndex)
         {
-            return Get<DateTime>(columnIndex);
+            return GetValue<DateTime>(columnIndex);
         }
 
         public DateTime GetDateTime(string columnName)
@@ -256,7 +319,7 @@ namespace DataFile.Models
 
         public decimal GetDecimal(int columnIndex)
         {
-            return Get<decimal>(columnIndex);
+            return GetValue<decimal>(columnIndex);
         }
 
         public decimal GetDecimal(string columnName)
@@ -267,7 +330,7 @@ namespace DataFile.Models
 
         public double GetDouble(int columnIndex)
         {
-            return Get<double>(columnIndex);
+            return GetValue<double>(columnIndex);
         }
 
         public double GetDouble(string columnName)
@@ -278,7 +341,7 @@ namespace DataFile.Models
 
         public float GetFloat(int columnIndex)
         {
-            return Get<float>(columnIndex);
+            return GetValue<float>(columnIndex);
         }
 
         public float GetFloat(string columnName)
@@ -289,7 +352,7 @@ namespace DataFile.Models
 
         public Guid GetGuid(int columnIndex)
         {
-            return Get<Guid>(columnIndex);
+            return GetValue<Guid>(columnIndex);
         }
 
         public Guid GetGuid(string columnName)
@@ -300,7 +363,7 @@ namespace DataFile.Models
 
         public short GetInt16(int columnIndex)
         {
-            return Get<short>(columnIndex);
+            return GetValue<short>(columnIndex);
         }
 
         public short GetInt16(string columnName)
@@ -311,7 +374,7 @@ namespace DataFile.Models
 
         public int GetInt32(int columnIndex)
         {
-            return Get<int>(columnIndex);
+            return GetValue<int>(columnIndex);
         }
 
         public int GetInt32(string columnName)
@@ -322,7 +385,7 @@ namespace DataFile.Models
 
         public long GetInt64(int columnIndex)
         {
-            return Get<long>(columnIndex);
+            return GetValue<long>(columnIndex);
         }
 
         public long GetInt64(string columnName)
@@ -333,12 +396,16 @@ namespace DataFile.Models
 
         public string GetName(int columnIndex)
         {
-            return DataFile.Columns[columnIndex].Name;
+            if (Layout == null)
+            {
+                throw new Exception("A layout is required for this method");
+            }
+            return Layout.Columns[columnIndex].Name;
         }
 
         public int GetOrdinal(string columnName)
         {
-            return GetColumnIndex(columnName);
+            return GetColumnIndex(columnName, true);
         }
 
         public DataTable GetSchemaTable()
@@ -348,7 +415,7 @@ namespace DataFile.Models
 
         public string GetString(int columnIndex)
         {
-            return Get<string>(columnIndex);
+            return GetValue<string>(columnIndex);
         }
 
         public string GetString(string columnName)
@@ -373,6 +440,11 @@ namespace DataFile.Models
             throw new NotSupportedException();
         }
 
+        public object[] GetValues()
+        {
+            return _values;
+        }
+
         public bool IsDBNull(int columnIndex)
         {
             return this[columnIndex] == DBNull.Value;
@@ -386,171 +458,30 @@ namespace DataFile.Models
 
         public bool NextResult()
         {
-            if (!_readingExcel) return false;
-            var excelReader = GetSourceReader<IExcelDataReader>();
-            return excelReader.NextResult();
+            return _activeReader.NextResult();
         }
 
         public void Close()
         {
-            if (_readingExcel)
-            {
-                var excelReader = GetSourceReader<IExcelDataReader>();
-                excelReader.Close();
-            }
-            else
-            {
-                var reader = GetSourceReader<StreamReader>();
-                reader.Close();
-            }
+            if (!_open) return;
+            _activeReader.Close();
             _open = false;
         }
 
         public void Dispose()
         {
-            if (_readingExcel)
+            Close();
+            if (_activeReader != null)
             {
-                var excelReader = GetSourceReader<IExcelDataReader>();
-                excelReader.Dispose();
-            }
-            else
-            {
-                var reader = GetSourceReader<StreamReader>();
-                reader.Dispose();
+                _activeReader.Dispose();
             }
         }
-
-        protected string[] SplitByFormat(string stringToSplit)
-        {
-            switch (DataFile.Format)
-            {
-                case DataFileFormat.CommaDelimited:
-                    return ParseCsvRow(stringToSplit);
-                case DataFileFormat.SpaceDelimited:
-                    return
-                        DataFile.Columns.Select(column => stringToSplit.Substring(column.Start, column.Length))
-                            .ToArray();
-                default:
-                    return stringToSplit.Split(new[] { DataFile.FieldDelimeter }, StringSplitOptions.None);
-            }
-        }
-
-        protected static string[] ParseCsvRow(string r)
-        {
-            var resp = new List<string>();
-            var cont = false;
-            var cs = "";
-
-            var c = r.Split(new[] { ',' }, StringSplitOptions.None);
-
-            foreach (var y in c)
-            {
-                var x = y.Trim();
-
-                if (cont)
-                {
-                    // End of field
-                    if (x.EndsWith("\""))
-                    {
-                        cs += "," + x.Substring(0, x.Length - 1);
-                        resp.Add(cs);
-                        cs = "";
-                        cont = false;
-                        continue;
-                    }
-                    // Field still not ended
-                    cs += "," + x;
-                    continue;
-                }
-
-                // Start of encapsulation but comma has split it into at least next field
-                if (x.StartsWith("\"") && !x.EndsWith("\"") || x == "\"")
-                {
-                    cont = true;
-                    cs += x.Substring(1);
-                    continue;
-                }
-
-                // Fully encapsulated with no comma within
-                if (x.StartsWith("\"") && x.EndsWith("\""))
-                {
-                    if ((x.EndsWith("\"\"") && !x.EndsWith("\"\"\"")) && x != "\"\"")
-                    {
-                        cont = true;
-                        cs = x;
-                        continue;
-                    }
-
-                    resp.Add(x.Substring(1, x.Length - 2));
-                    continue;
-                }
-
-
-                // Non encapsulated complete field
-                resp.Add(x);
-            }
-
-
-            return resp.ToArray();
-        }
-
-        protected string RemoveTextQualifiers(string value)
-        {
-            if (string.IsNullOrWhiteSpace(TextQualifier) || string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-            return value.Trim(TextQualifier.ToCharArray());
-        }
-
-        private static string ConvertToString(object value)
-        {
-            return value == null ? string.Empty : value.ToString();
-        }
-
-        private StreamReader GetFileReader()
-        {
-            return File.OpenText(DataFile.FullName);
-        }
-
-        private IExcelDataReader GetExcelDataReader(bool skipColumnRow = false, bool onActiveWorksheet = true)
-        {
-            var stream = File.Open(DataFile.FullName, FileMode.Open, FileAccess.Read);
-            var reader = DataFile.Format == DataFileFormat.XLSX
-                                ? ExcelReaderFactory.CreateOpenXmlReader(stream)
-                                : ExcelReaderFactory.CreateBinaryReader(stream);
-            reader.IsFirstRowAsColumnNames = DataFile.HasColumnHeaders;
-            if (onActiveWorksheet && !string.IsNullOrEmpty(DataFile.ActiveWorksheet))
-            {
-                var foundSheet = false;
-                for (var x = 0; x < reader.ResultsCount; x++)
-                {
-                    if (reader.Name.Equals(DataFile.ActiveWorksheet))
-                    {
-                        foundSheet = true;
-                        break;
-                    }
-                    reader.NextResult();
-                }
-                if (!foundSheet)
-                {
-                    throw new Exception(string.Format("The specified Excel Sheet \" {0} \" was not found", DataFile.ActiveWorksheet));
-                }
-            }
-
-            if (skipColumnRow && DataFile.HasColumnHeaders)
-            {
-                reader.Read();
-            }
-            return reader;
-        }
-
         private int GetColumnIndex(string columnName, bool throwExceptionifNotFound = false)
         {
             var columnIndex = -1;
-            for (var index = 0; index < DataFile.Columns.Count; index++)
+            for (var index = 0; index < Layout.Columns.Count; index++)
             {
-                var column = DataFile.Columns[index];
+                var column = Layout.Columns[index];
                 if (column.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase))
                 {
                     columnIndex = index;
@@ -560,11 +491,10 @@ namespace DataFile.Models
             {
                 if (columnIndex == -1)
                 {
-                    throw new Exception("Column not found");
+                    throw new IndexOutOfRangeException("Column not found");
                 }
             }
             return columnIndex;
         }
-
     }
 }

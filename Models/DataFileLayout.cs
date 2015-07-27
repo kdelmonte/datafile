@@ -1,33 +1,56 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace DataFile.Models
 {
     public class DataFileLayout
     {
-        public DataFileColumnList Columns = new DataFileColumnList();
-        public bool HasColumnHeaders;
-        public string Name;
+        public DataFileColumnList Columns { get; set; }
+        public string Name { get; set; }
+        public bool HasColumnHeaders { get; set; }
+        public int Width { get; set; }
+        public string TextQualifier { get; set; }
 
-        public DataFileLayout()
+        private DataFileFormat _format;
+        public DataFileFormat Format
         {
-        }
-
-        public DataFileLayout(string json)
-        {
-            var layout = JsonConvert.DeserializeObject<DataFileLayout>(json);
-            if (layout == null) return;
-            var l = layout.GetType();
-            var properties = l.GetFields();
-            foreach (var pi in properties)
+            get { return _format; }
+            set
             {
-                pi.SetValue(this, pi.GetValue(layout));
+                _format = value;
+                var delimiter = DataFileFieldDelimiter.ByFormat(_format);
+                if (delimiter != null)
+                {
+                    _fieldDelimiter = delimiter;
+                }
             }
         }
 
-        public DataFileLayout(string name, DataFileInfo leadFileInfo)
+        
+        private string _fieldDelimiter;
+        public string FieldDelimiter
         {
-            Name = name;
-            Columns = leadFileInfo.Columns;
+            get { return _fieldDelimiter; }
+            set
+            {
+                _fieldDelimiter = value;
+                var derivedFormat = DataFileFieldDelimiter.GetFormatByDelimiter(_fieldDelimiter);
+                if (derivedFormat != null)
+                {
+                    _format = (DataFileFormat) derivedFormat;
+                }
+            }
+        }
+
+        public DataFileLayout()
+        {
+            Columns = new DataFileColumnList();
+            TextQualifier = "\"";
+        }
+
+        public DataFileLayout Clone()
+        {
+            return Utilities.CloneWithSerialization<DataFileLayout>(this);
         }
     }
 }
