@@ -17,7 +17,7 @@ namespace DataFile.Models.Database
         public List<ColumnModificationExpression> AlterExpressions { get; private set; }
         public DataFileInfo SourceFile { get; set; }
         public bool Shuffling { get; private set; }
-        public IDataFileDbAdapter Interface { get; set; }
+        public IDataFileDbAdapter Adapter { get; set; }
         public PredicateClauseType LastPredicateClauseUsed { get; private set; }
         private DataFileQueryMode _mode;
         public DataFileQueryMode Mode
@@ -31,7 +31,7 @@ namespace DataFile.Models.Database
                     _mode = value;
                     return;
                 }
-                Next = new DataFileQuery(_activeQuery.SourceFile, _activeQuery.Interface)
+                Next = new DataFileQuery(_activeQuery.SourceFile, _activeQuery.Adapter)
                 {
                     Mode = value,
                     EntryPoint = _activeQuery.EntryPoint
@@ -66,37 +66,37 @@ namespace DataFile.Models.Database
 
         public string GetSelectClause()
         {
-            return _activeQuery.Interface.BuildSelectClause(_activeQuery);
+            return _activeQuery.Adapter.BuildSelectClause(_activeQuery);
         }
 
         public string GetInsertIntoClause()
         {
-            return _activeQuery.Interface.BuildInsertIntoClause(_activeQuery);
+            return _activeQuery.Adapter.BuildInsertIntoClause(_activeQuery);
         }
 
         public string GetUpdateClause()
         {
-            return _activeQuery.Interface.BuildUpdateClause(_activeQuery);
+            return _activeQuery.Adapter.BuildUpdateClause(_activeQuery);
         }
 
         public string GetOrderByClause()
         {
-            return _activeQuery.Interface.BuildOrderByClause(_activeQuery);
+            return _activeQuery.Adapter.BuildOrderByClause(_activeQuery);
         }
 
         public string GetGroupByClause()
         {
-            return _activeQuery.Interface.BuildGroupByClause(_activeQuery);
+            return _activeQuery.Adapter.BuildGroupByClause(_activeQuery);
         }
 
         public string GetWhereClause()
         {
-            return _activeQuery.Interface.BuildPredicateClause(_activeQuery, PredicateClauseType.Where);
+            return _activeQuery.Adapter.BuildPredicateClause(_activeQuery, PredicateClauseType.Where);
         }
 
         public string GetHavingClause()
         {
-            return _activeQuery.Interface.BuildPredicateClause(_activeQuery, PredicateClauseType.Having);
+            return _activeQuery.Adapter.BuildPredicateClause(_activeQuery, PredicateClauseType.Having);
         }
 
         public DataFileQuery()
@@ -110,10 +110,10 @@ namespace DataFile.Models.Database
             AlterExpressions = new List<ColumnModificationExpression>();
         }
 
-        public DataFileQuery(DataFileInfo sourceFile,IDataFileDbAdapter dbInterface) : this()
+        public DataFileQuery(DataFileInfo sourceFile,IDataFileDbAdapter dbAdapter) : this()
         {
             SourceFile = sourceFile;
-            Interface = dbInterface;
+            Adapter = dbAdapter;
         }
 
         public List<DataFileQuery> GetQueries()
@@ -130,13 +130,13 @@ namespace DataFile.Models.Database
 
         public string ToQuery()
         {
-            return Interface.BuildQuery(this);
+            return Adapter.BuildQuery(this);
         }
 
         public string ToQueryBatch()
         {
-            var queries = GetQueries().Select(query => query.Interface.BuildQuery(query));
-            return string.Join(Interface.QueryBatchSeparator, queries);
+            var queries = GetQueries().Select(query => query.Adapter.BuildQuery(query));
+            return string.Join(Adapter.QueryBatchSeparator, queries);
         }
 
         public DataFileQuery SetSourceFile(DataFileInfo sourceFile)
@@ -559,7 +559,7 @@ namespace DataFile.Models.Database
                 AlterExpressions
             };
             var clone = CloneObject<DataFileQuery>(serializable);
-            clone.Interface = Interface;
+            clone.Adapter = Adapter;
             clone.RowLimit = RowLimit;
             clone.SourceFile = SourceFile;
             clone.InsertIntoExpression = CloneObject<InsertIntoExpression>(InsertIntoExpression);

@@ -418,7 +418,7 @@ namespace DataFile.Models.Database.Adapters
             {
                 cn.Open();
                 var schemaTable = new DataTable();
-                var schemaQuery = new DataFileQuery(query.SourceFile, query.Interface);
+                var schemaQuery = new DataFileQuery(query.SourceFile, query.Adapter);
                 schemaQuery
                     .Select(query.SelectExpressions)
                     .Limit(1)
@@ -465,7 +465,7 @@ namespace DataFile.Models.Database.Adapters
             }
         }
 
-        public void QueryToTable(string targetConnectionString, string targetTable, DataFileQuery query)
+        public void QueryToTable(string targetConnectionString, string targetTableName, DataFileQuery query)
         {
             var sourceTableConnection = new SqlConnection(ConnectionString);
             var targetTableConnection = new SqlConnection(targetConnectionString ?? ConnectionString);
@@ -476,7 +476,7 @@ namespace DataFile.Models.Database.Adapters
                 const string sql = "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = @TableId";
                 using (var cmd = new SqlCommand(sql, targetTableConnection))
                 {
-                    cmd.Parameters.AddWithValue("@TableId", targetTable);
+                    cmd.Parameters.AddWithValue("@TableId", targetTableName);
                     var count = Convert.ToInt32(cmd.ExecuteScalar());
                     tableExists = count > 0;
                 }
@@ -485,7 +485,7 @@ namespace DataFile.Models.Database.Adapters
                 {
                     sourceTableConnection.Open();
                     var sourceTableSchema = new DataTable();
-                    var schemaQuery = new DataFileQuery(query.SourceFile, query.Interface);
+                    var schemaQuery = new DataFileQuery(query.SourceFile, query.Adapter);
                     schemaQuery
                         .Select(query.SelectExpressions)
                         .Limit(1)
@@ -496,14 +496,28 @@ namespace DataFile.Models.Database.Adapters
                         da.FillSchema(sourceTableSchema, SchemaType.Source);
                     }
 
-                    var tableCreator = new TransactSqlTableCreator(targetTableConnection) { DestinationTableName = targetTable };
+                    var tableCreator = new TransactSqlTableCreator(targetTableConnection) { DestinationTableName = targetTableName };
                     tableCreator.CreateFromDataTable(sourceTableSchema);
+                }
+
+                sourceTableConnection.Open();
+                var targetTableSchema = new DataTable();
+                var targetSchemaQuery = string.Format("SELECT * FROM [{0}]", targetTableName);
+                using (var cmd = new SqlCommand(targetSchemaQuery, sourceTableConnection))
+                {
+                    var da = new SqlDataAdapter(cmd);
+                    da.FillSchema(targetTableSchema, SchemaType.Source);
                 }
 
                 using (var bulkCopy = new SqlBulkCopy(targetTableConnection){BulkCopyTimeout = CommandTimeout})
                 {
-                    bulkCopy.DestinationTableName = "[" + targetTable + "]";
-                    bulkCopy.WriteToServer(GetDataReader(query));
+                    var reader = GetDataReader(query);
+                    if (reader.FieldCount != targetTableSchema.Columns.Count)
+                    {
+                        throw new Exception("The number of columns of the source table do no match the number of columns of the target table");
+                    }
+                    bulkCopy.DestinationTableName = "[" + targetTableName + "]";
+                    bulkCopy.WriteToServer(reader);
                 }
             }
             finally

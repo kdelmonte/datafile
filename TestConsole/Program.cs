@@ -16,11 +16,11 @@ namespace TestConsole
             var fileDirectory = new DirectoryInfo(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles");
             var targetFile = fileDirectory.GetFiles("*" + fileName + "*").First();
             Console.WriteLine("Processing {0}", targetFile.FullName);
-            var tSqlInterface = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
+            var transactSqlAdapter = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
             {
                 CommandTimeout = 0
             };
-            using (var dataFile = new DataFileInfo(targetFile.FullName, true, tSqlInterface) { TableName = fileName })
+            using (var dataFile = new DataFileInfo(targetFile.FullName, true, transactSqlAdapter) { TableName = fileName })
             {
                 dataFile.BeginDatabaseSession();
             }
