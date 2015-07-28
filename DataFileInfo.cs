@@ -428,6 +428,23 @@ namespace DataFile
             Extension = sourceFile.Extension;
         }
 
+        private void RetrieveSheets()
+        {
+            Sheets = new List<string>();
+            using (var reader = GetDataReader(false,false))
+            {
+                if (!string.IsNullOrWhiteSpace(reader.CurrentWorksheet))
+                {
+                    Sheets.Add(reader.CurrentWorksheet);
+                }
+                while (reader.NextResult())
+                {
+                    Sheets.Add(reader.CurrentWorksheet);
+                }
+            }
+            
+        }
+
         private void Initialize()
         {
             if (!Exists) return;
@@ -438,6 +455,7 @@ namespace DataFile
                 case "xls":
                 case "xlsx":
                     Layout.Format = extension == "xlsx" ? DataFileFormat.XLSX : DataFileFormat.XLS;
+                    RetrieveSheets();
                     break;
                 default:
                     DetermineFieldDelimiter();
@@ -446,16 +464,6 @@ namespace DataFile
 
             using (var reader = GetDataReader(true, false))
             {
-                Sheets = new List<string>();
-                if (!string.IsNullOrWhiteSpace(reader.CurrentWorksheet))
-                {
-                    Sheets.Add(reader.CurrentWorksheet);
-                }
-                while (reader.NextResult())
-                {
-                    Sheets.Add(reader.CurrentWorksheet);
-                }
-
                 if (!Layout.Columns.Any())
                 {
                     if (Layout.HasColumnHeaders)

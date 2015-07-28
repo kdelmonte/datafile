@@ -12,7 +12,7 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            const string fileName = "1M";
+            const string fileName = "16K";
             var fileDirectory = new DirectoryInfo(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles");
             var targetFile = fileDirectory.GetFiles("*" + fileName + "*").First();
             Console.WriteLine("Processing {0}", targetFile.FullName);
