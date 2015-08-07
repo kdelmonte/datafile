@@ -30,36 +30,27 @@ namespace DataFile
         public string TableName { get; set; }
 
         public string DirectoryName { get; set; }
-        public bool EvaluatedEntirely { get; set; }
+        public bool Analyzed { get; private set; }
         public List<string> Sheets { get; set; }
         public string Extension { get; set; }
 
         public string FullName { get; set; }
         
 
-        public bool IsFixedWidth
-        {
-            get { return Layout.Format == DataFileFormat.SpaceDelimited; }
-        }
+        public bool IsFixedWidth => Layout.Format == DataFileFormat.SpaceDelimited;
 
         public long Length { get; set; }
         public string Name { get; set; }
         public string NameWithoutExtension { get; set; }
         public List<List<object>> SampleRows { get; set; }
 
-        public Validity Validity { get; set; }
+        public DataFileValidity Validity { get; private set; }
         
         public IDataFileDbAdapter DatabaseAdapter { get; set; }
 
-        public bool Exists
-        {
-            get { return File.Exists(FullName); }
-        }
+        public bool Exists => File.Exists(FullName);
 
-        public bool IsEmpty
-        {
-            get { return SampleRows.Count == 0; }
-        }
+        public bool IsEmpty => SampleRows.Count == 0;
 
         public string ActiveWorksheet { get; private set; }
 
@@ -82,7 +73,7 @@ namespace DataFile
             Layout = new DataFileLayout();
             TableName = Guid.NewGuid().ToString("N");
             SampleRows = new List<List<object>>();
-            Validity = new Validity();
+            Validity = new DataFileValidity();
         } 
 
         public DataFileInfo(IDataFileDbAdapter dbAdapter = null): this()
@@ -131,9 +122,9 @@ namespace DataFile
         public DataFileReader GetDataReader(bool onColumnRow = false, bool onActiveSheet = true)
         {
             var reader = new DataFileReader(FullName,Layout);
-            if (onColumnRow)
+            if (onColumnRow && Layout.HasColumnHeaders)
             {
-                reader.Skip = 1;
+                reader.StartAt = 1;
             }
             if (onActiveSheet)
             {
@@ -147,10 +138,7 @@ namespace DataFile
         {
             if (!DatabaseSessionActive || KeepSessionOpenOnDispose) return;
             StopDatabaseSession();
-            if (OnDatabaseSessionClose != null)
-            {
-                OnDatabaseSessionClose();
-            }
+            OnDatabaseSessionClose?.Invoke();
         }
 
         public void SwitchToWorkSheet(int sheetIndex)
@@ -166,12 +154,12 @@ namespace DataFile
             Initialize();
         }
 
-        public void EvaluateEntirelyFromDisk()
+        public void AnalyzeFromDisk()
         {
-            TotalRecords = 0;
+            var totalRecords = 0;
             if (IsFixedWidth && Layout != null)
             {
-                EvaluatedEntirely = true;
+                Analyzed = true;
                 return;
             }
             using (var reader = GetDataReader(true))
@@ -181,21 +169,69 @@ namespace DataFile
                     for (var x = 0; x < Layout.Columns.Count; x++)
                     {
                         var column = Layout.Columns[x];
-                        var value = reader[column.Index].ToString();
+                        var value = reader[x].ToString();
                         if (value.Length > column.Length)
                         {
                             column.Length = value.Length;
                         }
                         Layout.Columns[x] = column;
                     }
-                    TotalRecords++;
+                    totalRecords++;
                 }
             }
             foreach (var column in Layout.Columns.Where(column => column.Length == 0))
             {
                 column.Length = 1;
             }
-            EvaluatedEntirely = true;
+            TotalRecords = totalRecords;
+            Analyzed = true;
+        }
+
+        public DataFileValidity Validate()
+        {
+            var validity = new DataFileValidity();
+            var unconfirmedErrors = new List<DataFileValueValidity>();
+            var currentRow = 0;
+            using (var reader = GetDataReader(true))
+            {
+                while (reader.Read())
+                {
+                    var rowErrors = new List<DataFileValueValidity>();
+                    for (int index = 0; index < Layout.Columns.Count; index++)
+                    {
+                        var column = Layout.Columns[index];
+                        var value = reader[index];
+                        var valueValidity = column.ValidateValue(value);
+                        if (!valueValidity.Valid)
+                        {
+                            valueValidity.ColumnIndex = index;
+                            valueValidity.RowNumber = currentRow;
+                            rowErrors.Add(valueValidity);
+                        }
+                    }
+                    if (reader.CurrentRecord.IsEmpty())
+                    {
+                        unconfirmedErrors.AddRange(rowErrors);
+                    }
+                    else
+                    {
+                        validity.InvalidValues.AddRange(unconfirmedErrors);
+                        unconfirmedErrors.Clear();
+                        validity.InvalidValues.AddRange(rowErrors);
+                    }
+                    currentRow++;
+                }
+            }
+            if (validity.HasInvalidValues)
+            {
+                validity.AddError("File contains invalid values");
+            }
+            if (currentRow == 0)
+            {
+                validity.AddWarning("File is empty");
+            }
+            Validity = validity;
+            return Validity;
         }
 
         public void ChangeLayout(DataFileLayout layout, List<DataFileColumnMapping> mappings = null)
@@ -395,7 +431,7 @@ namespace DataFile
             }
             finally
             {
-                if (reader != null) reader.Close();
+                reader?.Close();
             }
         }
 
@@ -408,7 +444,7 @@ namespace DataFile
                     var column = Layout.Columns[x];
                     foreach (var row in SampleRows)
                     {
-                        var value = row[column.Index];
+                        var value = row[x];
                         column.ExampleValue = value;
                     }
                     Layout.Columns[x] = column;
@@ -462,46 +498,62 @@ namespace DataFile
                     break;
             }
 
-            using (var reader = GetDataReader(true, false))
+            using (var reader = GetDataReader(false, false))
             {
-                if (!Layout.Columns.Any())
+                if (reader.Read())
                 {
-                    if (Layout.HasColumnHeaders)
+                    if (!Layout.Columns.Any())
                     {
-                        for (var i = 0; i < reader.FieldCount; i++)
+                        if (Layout.HasColumnHeaders)
                         {
-                            Layout.Columns.Add(new DataFileColumn(i, reader[i].ToString()));
+                            for (var i = 0; i < reader.FieldCount; i++)
+                            {
+                                Layout.Columns.Add(new DataFileColumn(reader[i].ToString()));
+                            }
+                        }
+                        else
+                        {
+                            for (var i = 0; i < reader.FieldCount; i++)
+                            {
+                                Layout.Columns.Add(new DataFileColumn(DefaultColumnName + (i + 1)));
+                            }
+                            SampleRows.Add(reader.GetValues().ToList());
                         }
                     }
                     else
                     {
-                        for (var i = 0; i < reader.FieldCount; i++)
+                        var headersFound = true;
+                        for (var i = 0; i < Layout.Columns.Count; i++)
                         {
-                            Layout.Columns.Add(new DataFileColumn(i, DefaultColumnName + (i + 1)));
+                            var value = reader[i].ToString();
+                            var column = Layout.Columns[i];
+                            if (!column.Name.Trim().Equals(value.Trim(), StringComparison.OrdinalIgnoreCase))
+                            {
+                                headersFound = false;
+                                break;
+                            }
                         }
+                        Layout.HasColumnHeaders = headersFound;
+
+                        if (!Layout.HasColumnHeaders)
+                        {
+                            SampleRows.Add(reader.GetValues().ToList());
+                        }
+                    }
+
+                    while (reader.Read() && SampleRows.Count < NumberOfExampleRows)
+                    {
                         SampleRows.Add(reader.GetValues().ToList());
                     }
                 }
-                
-                while (reader.Read() && SampleRows.Count < NumberOfExampleRows)
-                {
-                    SampleRows.Add(reader.GetValues().ToList());
-                }
             }
-
-            if (IsEmpty)
-            {
-                Validity.AddWarning("File is empty");
-            }
+            
             foreach (var column in Layout.Columns.Where(column => column.Length == 0))
             {
                 column.Length = 1;
             }
             InitializeColumnProperties();
-            if (OnInitialize != null)
-            {
-                OnInitialize();
-            }
+            OnInitialize?.Invoke();
         }
 
 
@@ -524,7 +576,6 @@ namespace DataFile
                     throw new Exception("The current Fixed Width File has no layout. Please specify and try again.");
                 }
             }
-            const string tempExtension = ".temp";
             var eligibleForLayoutChange = settings.Mappings != null && settings.Mappings.Count > 0 && settings.Layout != null;
             switch (settings.Layout.Format)
             {
@@ -565,12 +616,13 @@ namespace DataFile
                         while (reader.Read())
                         {
                             var row = new List<object>();
-                            foreach (var targetColumn in Layout.Columns)
+                            for (int index = 0; index < Layout.Columns.Count; index++)
                             {
+                                var targetColumn = Layout.Columns[index];
                                 var foundMap = false;
                                 foreach (var mapping in settings.Mappings)
                                 {
-                                    if (mapping.Target != targetColumn.Index) continue;
+                                    if (mapping.Target != index) continue;
                                     if (Layout.Columns.Count > mapping.Source)
                                     {
                                         var value = reader[mapping.Source];

@@ -4,7 +4,7 @@ using Newtonsoft.Json.Linq;
 
 namespace DataFile.Models
 {
-    public static class Utilities
+    static class Utilities
     {
         public static string BytesToReadableSize(long length)
         {

@@ -34,14 +34,7 @@ namespace DataFile.Models.Database.Adapters
                 {OrderByDirection.Desc, "DESC"}
             };
 
-        public string QueryBatchSeparator
-        {
-            get
-            {
-                return string.Format("{0}{1}{2}", Environment.NewLine + Environment.NewLine, "GO",
-                    Environment.NewLine + Environment.NewLine);
-            }
-        }
+        public string QueryBatchSeparator => $"{Environment.NewLine + Environment.NewLine}{"GO"}{Environment.NewLine + Environment.NewLine}";
 
         public string ConnectionString { get; set; }
         public string FileImportDirectoryPath { get; set; }
@@ -65,25 +58,25 @@ namespace DataFile.Models.Database.Adapters
         public string BuildQuery(DataFileQuery query)
         {
             var builder = new List<string>();
-            var limitClause = query.RowLimit == null ? "" : string.Format(" TOP {0} ", query.RowLimit);
+            var limitClause = query.RowLimit == null ? "" : $" TOP {query.RowLimit} ";
             switch (query.Mode)
             {
                 case DataFileQueryMode.Alter:
                     return BuildAlterClause(query);
                 case DataFileQueryMode.Select:
-                    builder.Add(string.Format("SELECT{0} {1}", limitClause, BuildSelectClause(query)));
-                    builder.Add(string.Format("FROM [{0}]", query.SourceFile.TableName));
+                    builder.Add($"SELECT{limitClause} {BuildSelectClause(query)}");
+                    builder.Add($"FROM [{query.SourceFile.TableName}]");
                     break;
                 case DataFileQueryMode.Delete:
-                    builder.Add(string.Format("DELETE{0} [{1}]", limitClause, query.SourceFile.TableName));
+                    builder.Add($"DELETE{limitClause} [{query.SourceFile.TableName}]");
                     break;
                 case DataFileQueryMode.Update:
-                    builder.Add(string.Format("UPDATE{0} [{1}]", limitClause, query.SourceFile.TableName));
+                    builder.Add($"UPDATE{limitClause} [{query.SourceFile.TableName}]");
                     builder.Add("SET");
                     builder.Add(BuildUpdateClause(query));
                     break;
                 case DataFileQueryMode.Insert:
-                    builder.Add(string.Format("INSERT INTO [{0}] {1}", query.SourceFile.TableName, BuildInsertIntoClause(query)));
+                    builder.Add($"INSERT INTO [{query.SourceFile.TableName}] {BuildInsertIntoClause(query)}");
                     break;
             }
             var whereClause = BuildPredicateClause(query, PredicateClauseType.Where);
@@ -143,7 +136,7 @@ namespace DataFile.Models.Database.Adapters
             var valuesClauseBuilder = query.InsertIntoExpression.Values.Select(BuildValueExpression).ToList();
             var columnClause = JoinWithCommas(columnClauseBuilder);
             var valuesClause = JoinWithCommas(valuesClauseBuilder);
-            var insertIntoClause = string.Format("({0}) VALUES ({1})", columnClause, valuesClause);
+            var insertIntoClause = $"({columnClause}) VALUES ({valuesClause})";
             return insertIntoClause;
         }
 
@@ -169,7 +162,7 @@ namespace DataFile.Models.Database.Adapters
 
         public string BuildAlterClause(DataFileQuery query)
         {
-            var alterTableStatement = string.Format("ALTER TABLE [{0}]", query.SourceFile.TableName);
+            var alterTableStatement = $"ALTER TABLE [{query.SourceFile.TableName}]";
             var alterClauseBuilder = new List<string>();
             var addColumnExpressions = query.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Add).ToList();
             var deleteColumnExpressions = query.AlterExpressions.Where(expr => expr.ModificationType == ColumnModificationType.Delete).ToList();
@@ -182,8 +175,7 @@ namespace DataFile.Models.Database.Adapters
                 var columnsDeclarationBuilder = new List<string>();
                 foreach (var modifyExpression in deleteColumnExpressions)
                 {
-                    columnsDeclarationBuilder.Add(string.Format("{0}",
-                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                    columnsDeclarationBuilder.Add($"{BuildColumnModificationExpressionLiteral(modifyExpression)}");
                 }
                 alterClauseBuilder.Add(JoinWithCommas(columnsDeclarationBuilder));
             }
@@ -192,8 +184,8 @@ namespace DataFile.Models.Database.Adapters
                 var columnsDeclarationBuilder = new List<string>();
                 foreach (var modifyExpression in modifyColumnExpressions)
                 {
-                    columnsDeclarationBuilder.Add(string.Format("{0} ALTER COLUMN {1}", alterTableStatement,
-                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                    columnsDeclarationBuilder.Add(
+                        $"{alterTableStatement} ALTER COLUMN {BuildColumnModificationExpressionLiteral(modifyExpression)}");
                 }
                 alterClauseBuilder.Add(JoinWithNewLines(columnsDeclarationBuilder));
             }
@@ -204,8 +196,7 @@ namespace DataFile.Models.Database.Adapters
                 var columnsDeclarationBuilder = new List<string>();
                 foreach (var modifyExpression in addColumnExpressions)
                 {
-                    columnsDeclarationBuilder.Add(string.Format("{0}",
-                        BuildColumnModificationExpressionLiteral(modifyExpression)));
+                    columnsDeclarationBuilder.Add($"{BuildColumnModificationExpressionLiteral(modifyExpression)}");
                 }
                 alterClauseBuilder.Add(JoinWithCommas(columnsDeclarationBuilder));
             }
@@ -220,10 +211,8 @@ namespace DataFile.Models.Database.Adapters
             var predicateClauseBuilder = new List<string>();
             foreach (var predicate in predicates)
             {
-                predicateClauseBuilder.Add(string.Format("{0}({1})",
-                    predicateClauseBuilder.Any()
-                        ? ConjunctionOperatorDictionary[predicate.ConjunctionOperator] + " "
-                        : "", BuildPredicateLiteral(predicate)));
+                predicateClauseBuilder.Add(
+                    $"{(predicateClauseBuilder.Any() ? ConjunctionOperatorDictionary[predicate.ConjunctionOperator] + " " : "")}({BuildPredicateLiteral(predicate)})");
 
             }
             return JoinWithNewLines(predicateClauseBuilder);
@@ -246,10 +235,9 @@ namespace DataFile.Models.Database.Adapters
                 var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string>
                 {
-                    string.Format("CREATE TABLE {0} ({1})", targetTableName,
-                        GetColumnsDeclarationStatement(sourceFile.Layout.Columns)),
-                    string.Format("BULK INSERT {0}", targetTableName),
-                    string.Format("FROM '{0}'", importFile.FullName),
+                    $"CREATE TABLE {targetTableName} ({GetColumnsDeclarationStatement(sourceFile.Layout.Columns)})",
+                    $"BULK INSERT {targetTableName}",
+                    $"FROM '{importFile.FullName}'",
                     "WITH ("
                 };
 
@@ -258,19 +246,19 @@ namespace DataFile.Models.Database.Adapters
                     var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + ".xml");
                     CreateBcpFormatFile(sourceFile.Layout.Columns, formatFilePath);
                     formatFile = new FileInfo(formatFilePath);
-                    sqlBuilder.Add(string.Format("FORMATFILE = '{0}',", formatFilePath));
+                    sqlBuilder.Add($"FORMATFILE = '{formatFilePath}',");
                     sqlBuilder.Add("ROWTERMINATOR = '\\r\\n',");
                 }
                 else
                 {
-                    sqlBuilder.Add(string.Format("FIELDTERMINATOR = '{0}',", importFile.Layout.FieldDelimiter));
+                    sqlBuilder.Add($"FIELDTERMINATOR = '{importFile.Layout.FieldDelimiter}',");
                     sqlBuilder.Add("ROWTERMINATOR = '\\n',");
                 }
-                sqlBuilder.Add(string.Format("FIRSTROW = {0},", sourceFile.Layout.HasColumnHeaders ? 2 : 1));
+                sqlBuilder.Add($"FIRSTROW = {(sourceFile.Layout.HasColumnHeaders ? 2 : 1)},");
                 sqlBuilder.Add("TABLOCK, KEEPNULLS");
                 sqlBuilder.Add(")");
 
-                sqlBuilder.Add(string.Format("ALTER TABLE {0}", targetTableName));
+                sqlBuilder.Add($"ALTER TABLE {targetTableName}");
                 sqlBuilder.Add("ADD ___RecordId INT IDENTITY (1, 1) NOT NULL, ___GroupId UNIQUEIDENTIFIER NULL");
 
                 var sqlText = JoinWithNewLines(sqlBuilder);
@@ -279,10 +267,7 @@ namespace DataFile.Models.Database.Adapters
                 cn.Open();
                 cmd.ExecuteNonQuery();
                 importFile.Delete();
-                if (formatFile != null)
-                {
-                    formatFile.Delete();
-                }
+                formatFile?.Delete();
             }
             finally
             {
@@ -303,7 +288,7 @@ namespace DataFile.Models.Database.Adapters
             var cn = new SqlConnection(ConnectionString);
             try
             {
-                var sqlText = string.Format("DROP TABLE [{0}]", sourceFile.TableName);
+                var sqlText = $"DROP TABLE [{sourceFile.TableName}]";
                 var cmd = new SqlCommand(sqlText, cn) {CommandTimeout = CommandTimeout };
 
                 cn.Open();
@@ -315,20 +300,20 @@ namespace DataFile.Models.Database.Adapters
             }
         }
 
-        public DataFileInformation EvaluateEntirely(DataFileInfo sourceFile)
+        public DataFileInformation Analyze(DataFileInfo sourceFile)
         {
             var fileInfo = new DataFileInformation();
             var cn = new SqlConnection(ConnectionString);
             try
             {
                 var targetTableName = BracketWrap(sourceFile.TableName);
-                var sqlBuilder = new List<string> {string.Format("SELECT COUNT(*) FROM {0}", targetTableName)};
+                var sqlBuilder = new List<string> {$"SELECT COUNT(*) FROM {targetTableName}"};
 
                 var lengthlessColumns = sourceFile.Layout.Columns.Where(column => !column.LengthSpecified).ToList();
 
                 if (lengthlessColumns.Any())
                 {
-                    sqlBuilder.Add(string.Format("SELECT"));
+                    sqlBuilder.Add("SELECT");
                     var lengthQueryBuilder = new List<string>();
  
                     foreach (var lengthlessColumn in lengthlessColumns)
@@ -336,7 +321,7 @@ namespace DataFile.Models.Database.Adapters
                         lengthQueryBuilder.Add(string.Format("ISNULL(MAX(DATALENGTH({0})),0) AS {0}", BracketWrap(lengthlessColumn.Name)));
                     }
                     sqlBuilder.Add(JoinWithCommas(lengthQueryBuilder));
-                    sqlBuilder.Add(string.Format("FROM {0}", targetTableName));
+                    sqlBuilder.Add($"FROM {targetTableName}");
                 }
 
                 var sqlText = JoinWithNewLines(sqlBuilder);
@@ -502,7 +487,7 @@ namespace DataFile.Models.Database.Adapters
 
                 sourceTableConnection.Open();
                 var targetTableSchema = new DataTable();
-                var targetSchemaQuery = string.Format("SELECT * FROM [{0}]", targetTableName);
+                var targetSchemaQuery = $"SELECT * FROM [{targetTableName}]";
                 using (var cmd = new SqlCommand(targetSchemaQuery, sourceTableConnection))
                 {
                     var da = new SqlDataAdapter(cmd);
@@ -538,11 +523,8 @@ namespace DataFile.Models.Database.Adapters
                 return expression.Literal;
             }
             var column = expression.Column;
-            var literal = string.Format("{0}{1}",
-                BracketWrap(column.Name),
-                string.IsNullOrWhiteSpace(column.Alias) || !withAlias
-                    ? ""
-                    : string.Format(" AS {0}", BracketWrap(column.Alias)));
+            var literal =
+                $"{BracketWrap(column.Name)}{(string.IsNullOrWhiteSpace(column.Alias) || !withAlias ? "" : $" AS {BracketWrap(column.Alias)}")}";
             return literal;
         }
 
@@ -553,10 +535,8 @@ namespace DataFile.Models.Database.Adapters
                 return expression.Literal;
             }
 
-            var updateExpression = string.Format("{0} = {1}",
-                BuildExpressionLiteral(expression.ColumnExpression),
-                BuildValueExpression(expression.Value)
-                );
+            var updateExpression =
+                $"{BuildExpressionLiteral(expression.ColumnExpression)} = {BuildValueExpression(expression.Value)}";
             return updateExpression;
         }
 
@@ -585,18 +565,14 @@ namespace DataFile.Models.Database.Adapters
                 if (expression is DataFileQueryPredicate)
                 {
                     var childPredicate = (DataFileQueryPredicate) expression;
-                    predicateGroupBuilder.Add(string.Format("{0}({1})",
-                        predicateGroupBuilder.Any()
-                            ? ConjunctionOperatorDictionary[childPredicate.ConjunctionOperator] + " "
-                            : "", BuildPredicateLiteral(childPredicate)));
+                    predicateGroupBuilder.Add(
+                        $"{(predicateGroupBuilder.Any() ? ConjunctionOperatorDictionary[childPredicate.ConjunctionOperator] + " " : "")}({BuildPredicateLiteral(childPredicate)})");
                 }
                 else
                 {
                     var predicateExpression = (PredicateExpression) expression;
-                    predicateGroupBuilder.Add(string.Format("{0}{1}",
-                        predicateGroupBuilder.Any()
-                            ? ConjunctionOperatorDictionary[predicateExpression.ConjunctionOperator] + " "
-                            : "", BuildPredicateExpressionLiteral(predicateExpression)));
+                    predicateGroupBuilder.Add(
+                        $"{(predicateGroupBuilder.Any() ? ConjunctionOperatorDictionary[predicateExpression.ConjunctionOperator] + " " : "")}{BuildPredicateExpressionLiteral(predicateExpression)}");
                 }
 
 
@@ -618,11 +594,7 @@ namespace DataFile.Models.Database.Adapters
                 comparisonOperator = "IS";
             }
 
-            var predicate = string.Format("{0} {1} {2}",
-                BuildExpressionLiteral(expression.ColumnExpression),
-                comparisonOperator,
-                valueLiteral
-                );
+            var predicate = $"{BuildExpressionLiteral(expression.ColumnExpression)} {comparisonOperator} {valueLiteral}";
             return predicate;
         }
 
@@ -647,13 +619,13 @@ namespace DataFile.Models.Database.Adapters
                 case "System.Single":
                 case "System.Double":
                 case "System.Decimal":
-                    return string.Format("{0}", value);
+                    return $"{value}";
                 case "System.Boolean":
-                    return string.Format("{0}", (bool) value ? 1 : 0);
+                    return $"{((bool) value ? 1 : 0)}";
                 case "System.DateTime":
                 case "System.Char":
                 case "System.String":
-                    return string.Format("'{0}'", value);
+                    return $"'{value}'";
                 default:
                     throw new Exception("Unsupported value expression type");
             }
@@ -666,10 +638,8 @@ namespace DataFile.Models.Database.Adapters
                 return expression.Literal;
             }
 
-            var orderByExpression = string.Format("{0} {1}",
-                BuildExpressionLiteral(expression.ColumnExpression),
-                OrderByDirectionDictionary[expression.Direction] ?? "ASC"
-                );
+            var orderByExpression =
+                $"{BuildExpressionLiteral(expression.ColumnExpression)} {OrderByDirectionDictionary[expression.Direction] ?? "ASC"}";
             return orderByExpression;
         }
 
@@ -683,8 +653,8 @@ namespace DataFile.Models.Database.Adapters
         {
             var length = column.Length > 0 ? column.Length : 1;
             return column.LengthSpecified
-                ? string.Format("{0} CHAR({1})", WrapWithBrackets(column.Name), length)
-                : string.Format("{0} VARCHAR(MAX)", WrapWithBrackets(column.Name));
+                ? $"{WrapWithBrackets(column.Name)} CHAR({length})"
+                : $"{WrapWithBrackets(column.Name)} VARCHAR(MAX)";
         }
 
         private static XmlDocument CreateBcpFormatFile(IEnumerable<DataFileColumn> columns)
@@ -702,7 +672,7 @@ namespace DataFile.Models.Database.Adapters
             for (var x = 0; x < columnList.Count; x++)
             {
                 var col = columnList[x];
-                var id = (col.Index + 1).ToString();
+                var id = (x + 1).ToString();
                 var length = col.Length.ToString();
                 var column = ff.CreateElement("COLUMN");
                 column.SetAttribute("SOURCE", id);
@@ -746,7 +716,7 @@ namespace DataFile.Models.Database.Adapters
             {
                 split[i] = WrapWithBrackets(split[i]);
             }
-            return String.Join(",", split);
+            return string.Join(",", split);
         }
 
         private static string BracketWrap(string columnName)

@@ -25,6 +25,6 @@ namespace DataFile.Interfaces
         int ExecuteNonQuery(DataFileQuery query);
         void QueryToFile(DataFileQuery query, string targetFilePath, string newDelimiter);
         void QueryToTable(string targetConnectionString, string targetTableName, DataFileQuery query);
-        DataFileInformation EvaluateEntirely(DataFileInfo sourceFile);
+        DataFileInformation Analyze(DataFileInfo sourceFile);
     }
 }

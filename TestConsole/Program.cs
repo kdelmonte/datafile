@@ -1,7 +1,7 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
 using DataFile;
+using DataFile.Models;
 using DataFile.Models.Database.Adapters;
 using TestConsole.Properties;
 
@@ -12,16 +12,113 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            const string fileName = "16K";
-            var fileDirectory = new DirectoryInfo(@"C:\Users\kelvin.delmonte\Desktop\TestDataFiles");
-            var targetFile = fileDirectory.GetFiles("*" + fileName + "*").First();
+            var targetFile = new FileInfo(@"C:\Users\kelvin.delmonte\Desktop\AgentMightTestFiles\Reference\Users.xlsx");
             Console.WriteLine("Processing {0}", targetFile.FullName);
             var transactSqlAdapter = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
             {
                 CommandTimeout = 0
             };
-            using (var dataFile = new DataFileInfo(targetFile.FullName, true, transactSqlAdapter) { TableName = fileName })
+            var layout = new DataFileLayout
             {
+                Columns = new DataFileColumnList
+                {
+                    new DataFileColumn
+                    {
+                        Name = "Unique ID"
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "First Name*",
+                        Required = true
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Middle Name"
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Last Name*",
+                        Required = true
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Email",
+                        Pattern = @"^\w+([-+.']\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$"
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Username*",
+                        Required = true
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Role*",
+                        Required = true
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Location*",
+                        Required = true
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Admin",
+                        AllowedValues = new [] {"YES", "NO"},
+                        AllowedValuesComparison = StringComparison.OrdinalIgnoreCase
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Super Admin"
+                    },
+                    new DataFileColumn
+                    {
+                        Name = "Group"
+                    }
+                }
+            };
+            using (var dataFile = new DataFileInfo(targetFile.FullName, layout, transactSqlAdapter) { TableName = targetFile.Name })
+            {
+                dataFile.Validate();
+                if (!dataFile.Validity.Valid)
+                {
+                    Console.WriteLine("FILE HAS ERRORS:");
+                    foreach (var error in dataFile.Validity.Errors)
+                    {
+                        Console.WriteLine($"> {error}");
+                    }
+                    if (dataFile.Validity.HasInvalidValues)
+                    {
+                        Console.WriteLine("INVALID VALUES DETAIL:");
+                        foreach (var invalidValue in dataFile.Validity.InvalidValues)
+                        {
+                            Console.WriteLine($"row {invalidValue.RowNumber}, column: {invalidValue.ColumnIndex}");
+                            if (invalidValue.Error.DataType)
+                            {
+                                Console.WriteLine("Value does not match type");
+                            }
+                            if (invalidValue.Error.Required)
+                            {
+                                Console.WriteLine("Value cannot be empty");
+                            }
+                            if (invalidValue.Error.MinLength)
+                            {
+                                Console.WriteLine("Value is too short");
+                            }
+                            if (invalidValue.Error.MaxLength)
+                            {
+                                Console.WriteLine("Value is too long");
+                            }
+                            if (invalidValue.Error.AllowedValues)
+                            {
+                                Console.WriteLine("Value does not match any of the allowed values");
+                            }
+                            if (invalidValue.Error.Pattern)
+                            {
+                                Console.WriteLine("Value does not match pattern specified");
+                            }
+                        }
+                    }
+                }
                 dataFile.BeginDatabaseSession();
             }
             var end = DateTime.Now;

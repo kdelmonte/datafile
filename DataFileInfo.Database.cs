@@ -25,12 +25,9 @@ namespace DataFile
 
             if (Layout.Columns.Any(column => !column.LengthSpecified))
             {
-                EvaluateEntirely();
+                Analyze();
             }
-            if (OnDatabaseSessionOpen != null)
-            {
-                OnDatabaseSessionOpen();
-            }
+            OnDatabaseSessionOpen?.Invoke();
         }
 
         public void StopDatabaseSession()
@@ -43,10 +40,10 @@ namespace DataFile
             DatabaseSessionActive = false;
         }
 
-        public void EvaluateEntirely()
+        public void Analyze()
         {
             BeginDatabaseSession();
-            var info = DatabaseAdapter.EvaluateEntirely(this);
+            var info = DatabaseAdapter.Analyze(this);
             TotalRecords = info.TotalRecords;
             if (info.ColumnLengths.Any())
             {
@@ -65,7 +62,7 @@ namespace DataFile
                 var query = CreateQuery().Alter(ColumnModificationType.Modify, columnsWithUpdatedLengths);
                 DatabaseAdapter.ExecuteNonQuery(query);
             }
-            EvaluatedEntirely = true;
+            Analyzed = true;
         }
 
         public SqlDataReader ToSqlDataReader(DataFileQuery query = null, bool grouplessRecordsOnly = false, string groupId = null)

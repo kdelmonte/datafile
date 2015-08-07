@@ -77,10 +77,7 @@ namespace DataFile.Models
         public void Dispose()
         {
             Close();
-            if (_activeWriter != null)
-            {
-                _activeWriter.Dispose();
-            }
+            _activeWriter?.Dispose();
         }
     }
 }

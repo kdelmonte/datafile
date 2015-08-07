@@ -13,34 +13,12 @@ namespace DataFile.Models.Readers
     {
         public string Path { get; set; }
         public DataFileLayout Layout { get; set; }
-        public int Depth
-        {
-            get
-            {
-                return 0;
-            }
-        }
-        public int FieldCount
-        {
-            get
-            {
-                return _values.Length;
-            }
-        }
-        public bool IsClosed
-        {
-            get
-            {
-                return !_open;
-            }
-        }
-        public int RecordsAffected
-        {
-            get
-            {
-                return -1;
-            }
-        }
+        public int Depth => 0;
+        public int FieldCount => _values.Length;
+
+        public bool IsClosed => !_open;
+
+        public int RecordsAffected => -1;
         public string CurrentWorksheet { get; private set; }
         public string TargetWorksheetName { get; set; }
         private bool _open;
@@ -55,16 +33,13 @@ namespace DataFile.Models.Readers
             }
         }
 
-        public object this[int columnIndex]
-        {
-            get { return _values[columnIndex]; }
-        }
+        public object this[int columnIndex] => _values[columnIndex];
 
         public ExcelDataFileReader(string path, DataFileLayout layout)
         {
             if (layout == null)
             {
-                throw new ArgumentNullException("layout");
+                throw new ArgumentNullException(nameof(layout));
             }
             Path = path;
             Layout = layout;
@@ -94,7 +69,7 @@ namespace DataFile.Models.Readers
                 }
                 if (!foundSheet)
                 {
-                    throw new Exception(string.Format("The specified Worksheet \"{0}\" was not found", TargetWorksheetName));
+                    throw new Exception($"The specified Worksheet \"{TargetWorksheetName}\" was not found");
                 }
             }
             _activeReader = excelReader;
@@ -139,7 +114,7 @@ namespace DataFile.Models.Readers
                 return rtn;
             }
             if (Convert.IsDBNull(value)) return rtn;
-            var converter = TypeDescriptor.GetConverter(value.GetType());
+            var converter = TypeDescriptor.GetConverter(typeof(T));
             if (value is T)
             {
                 return (T) value;
@@ -307,10 +282,7 @@ namespace DataFile.Models.Readers
         public void Dispose()
         {
             Close();
-            if (_activeReader != null)
-            {
-                _activeReader.Dispose();
-            }
+            _activeReader?.Dispose();
         }
 
         private static string ConvertToString(object value)

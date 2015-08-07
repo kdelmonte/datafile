@@ -1,57 +1,24 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
 using System.Linq;
-using System.Text;
 using DataFile.Interfaces;
 using DataFile.Models.Readers;
-using Newtonsoft.Json.Linq;
 
 namespace DataFile.Models
 {
     public class DataFileReader: IDataFileReader
     {
         public string Path { get; set; }
-        private DataFileLayout _layout;
-        public DataFileLayout Layout
-        {
-            get { return _layout; }
-            set
-            {
-                _layout = value;
-                _columnsSpecified = _layout != null && _layout.Columns != null && _layout.Columns.Any();
-            }
-        }
-        public int Depth
-        {
-            get
-            {
-                return 0;
-            }
-        }
-        public int FieldCount
-        {
-            get
-            {
-                return _values.Length;
-            }
-        }
-        public bool IsClosed
-        {
-            get
-            {
-                return !_open;
-            }
-        }
-        public int RecordsAffected
-        {
-            get
-            {
-                return -1;
-            }
-        }
-        public int Skip { get; set; }
+        public DataFileLayout Layout { get;}
+
+        public int Depth => 0;
+
+        public int FieldCount => CurrentRecord.FieldCount;
+
+        public bool IsClosed => !_open;
+
+        public int RecordsAffected => -1;
+        public int StartAt { get; set; }
 
         public string CurrentWorksheet
         {
@@ -66,33 +33,24 @@ namespace DataFile.Models
         }
 
         public string TargetWorksheetName { get; set; }
+        public DataFileRecord CurrentRecord { get; private set; }
         private bool _open;
         private IDataFileReader _activeReader;
-        private bool _columnsSpecified;
-        private object[] _values;
+        private readonly bool _columnsSpecified;
 
-        public object this[string columnName]
-        {
-            get
-            {
-                var columnIndex = GetColumnIndex(columnName, true);
-                return this[columnIndex];
-            }
-        }
+        public object this[string columnName] => CurrentRecord[columnName];
 
-        public object this[int columnIndex]
-        {
-            get { return _values[columnIndex]; }
-        }
+        public object this[int columnIndex] => CurrentRecord[columnIndex];
 
         public DataFileReader(string path, DataFileLayout layout = null)
         {
             if (layout == null)
             {
-                throw new ArgumentNullException("layout");
+                throw new ArgumentNullException(nameof(layout));
             }
             Path = path;
             Layout = layout;
+            _columnsSpecified = Layout?.Columns != null && Layout.Columns.Any();
         }
 
         public void Open()
@@ -112,9 +70,9 @@ namespace DataFile.Models
                     break;
             }
             _activeReader.Open();
-            if (Skip > 0)
+            if (StartAt > 0)
             {
-                var lineNumber = Skip;
+                var lineNumber = StartAt;
                 while (lineNumber > 0 && Read())
                 {
                     lineNumber--;
@@ -127,9 +85,9 @@ namespace DataFile.Models
         {
             try
             {
-                var result = _activeReader.Read();
+                var endOfFile = !_activeReader.Read();
                 var values = new object[_columnsSpecified ? Layout.Columns.Count : _activeReader.FieldCount];
-                if (result)
+                if (!endOfFile)
                 {
                     if (_columnsSpecified)
                     {
@@ -151,8 +109,8 @@ namespace DataFile.Models
                     }
                     
                 }
-                _values = values;
-                return result;
+                CurrentRecord = new DataFileRecord(Layout, values);
+                return !endOfFile;
             }
             catch
             {
@@ -166,117 +124,68 @@ namespace DataFile.Models
 
         public T As<T>()
         {
-            if (Layout == null)
-            {
-                throw new Exception("A layout is required for this method");
-            }
-            var jsonObject = new JObject();
-            foreach (var column in Layout.Columns)
-            {
-                jsonObject[column.Name] = new JObject(_values[column.Index]);
-            }
-            return jsonObject.ToObject<T>();
+            return CurrentRecord.As<T>();
         }
 
 
         public T GetValue<T>(int columnIndex)
         {
-            var value = _values[columnIndex];
-            var rtn = default(T);
-            if (value == (object)rtn)
-            {
-                return rtn;
-            }
-            if (Convert.IsDBNull(value)) return rtn;
-            var converter = TypeDescriptor.GetConverter(value.GetType());
-            if (value is T)
-            {
-                return (T)value;
-            }
-            return (T)converter.ConvertFrom(value);
+            return CurrentRecord.GetValue<T>(columnIndex);
         }
 
         public T GetValue<T>(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetValue<T>(columnIndex);
+            return CurrentRecord.GetValue<T>(columnName);
         }
 
         public bool GetBoolean(int columnIndex)
         {
-            return GetValue<bool>(columnIndex);
+            return CurrentRecord.GetBoolean(columnIndex);
         }
 
         public bool GetBoolean(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetBoolean(columnIndex);
+            return CurrentRecord.GetBoolean(columnName);
         }
 
         public byte GetByte(int columnIndex)
         {
-            return GetValue<byte>(columnIndex);
+            return CurrentRecord.GetByte(columnIndex);
         }
 
         public byte GetByte(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetByte(columnIndex);
+            return CurrentRecord.GetByte(columnName);
         }
 
         public long GetBytes(int columnIndex, long fieldOffset, byte[] buffer, int bufferOffset, int length)
         {
-            var b = Encoding.UTF8.GetBytes(GetValue<string>(columnIndex));
-
-            if (bufferOffset >= b.Length)
-            {
-                return 0;
-            }
-
-            length = bufferOffset + length <= b.Length ? length : b.Length - bufferOffset;
-
-            Array.Copy(b, bufferOffset, buffer, 0, length);
-
-            return length;
+            return CurrentRecord.GetBytes(columnIndex, fieldOffset, buffer, bufferOffset, length);
         }
 
         public long GetBytes(string columnName, long fieldOffset, byte[] buffer, int bufferOffset, int length)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetBytes(columnIndex, fieldOffset, buffer, bufferOffset, length);
+            return CurrentRecord.GetBytes(columnName, fieldOffset, buffer, bufferOffset, length);
         }
 
         public char GetChar(int columnIndex)
         {
-            return GetValue<char>(columnIndex);
+            return CurrentRecord.GetChar(columnIndex);
         }
 
         public char GetChar(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetChar(columnIndex);
+            return CurrentRecord.GetChar(columnName);
         }
 
         public long GetChars(int columnIndex, long fieldOffset, char[] buffer, int bufferOffset, int length)
         {
-            var b = GetValue<string>(columnIndex).ToCharArray();
-
-            if (bufferOffset >= b.Length)
-            {
-                return 0;
-            }
-
-            length = bufferOffset + length <= b.Length ? length : b.Length - bufferOffset;
-
-            Array.Copy(b, bufferOffset, buffer, 0, length);
-
-            return length;
+            return CurrentRecord.GetChars(columnIndex, fieldOffset, buffer, bufferOffset, length);
         }
 
         public long GetChars(string columnName, long fieldOffset, char[] buffer, int bufferOffset, int length)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetChars(columnIndex, fieldOffset, buffer, bufferOffset, length);
+            return CurrentRecord.GetChars(columnName, fieldOffset, buffer, bufferOffset, length);
         }
 
         public IDataReader GetData(int columnIndex)
@@ -286,174 +195,157 @@ namespace DataFile.Models
 
         public Type GetFieldType(int columnIndex)
         {
-            return this[columnIndex].GetType();
+            return CurrentRecord.GetFieldType(columnIndex);
         }
 
         public Type GetFieldType(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetFieldType(columnIndex);
+            return CurrentRecord.GetFieldType(columnName);
         }
 
         public string GetDataTypeName(int columnIndex)
         {
-            return this[columnIndex].GetType().ToString();
+            return CurrentRecord.GetDataTypeName(columnIndex);
         }
 
         public string GetDataTypeName(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetDataTypeName(columnIndex);
+            return CurrentRecord.GetDataTypeName(columnName);
         }
 
         public DateTime GetDateTime(int columnIndex)
         {
-            return GetValue<DateTime>(columnIndex);
+            return CurrentRecord.GetDateTime(columnIndex);
         }
 
         public DateTime GetDateTime(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetDateTime(columnIndex);
+            return CurrentRecord.GetDateTime(columnName);
         }
 
         public decimal GetDecimal(int columnIndex)
         {
-            return GetValue<decimal>(columnIndex);
+            return CurrentRecord.GetDecimal(columnIndex);
         }
 
         public decimal GetDecimal(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetDecimal(columnIndex);
+            return CurrentRecord.GetDecimal(columnName);
         }
 
         public double GetDouble(int columnIndex)
         {
-            return GetValue<double>(columnIndex);
+            return CurrentRecord.GetDouble(columnIndex);
         }
 
         public double GetDouble(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetDouble(columnIndex);
+            return CurrentRecord.GetDouble(columnName);
         }
 
         public float GetFloat(int columnIndex)
         {
-            return GetValue<float>(columnIndex);
+            return CurrentRecord.GetFloat(columnIndex);
         }
 
         public float GetFloat(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetFloat(columnIndex);
+            return CurrentRecord.GetFloat(columnName);
         }
 
         public Guid GetGuid(int columnIndex)
         {
-            return GetValue<Guid>(columnIndex);
+            return CurrentRecord.GetGuid(columnIndex);
         }
 
         public Guid GetGuid(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetGuid(columnIndex);
+            return CurrentRecord.GetGuid(columnName);
         }
 
         public short GetInt16(int columnIndex)
         {
-            return GetValue<short>(columnIndex);
+            return CurrentRecord.GetInt16(columnIndex);
         }
 
         public short GetInt16(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetInt16(columnIndex);
+            return CurrentRecord.GetInt16(columnName);
         }
 
         public int GetInt32(int columnIndex)
         {
-            return GetValue<int>(columnIndex);
+            return CurrentRecord.GetInt32(columnIndex);
         }
 
         public int GetInt32(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetInt32(columnIndex);
+            return CurrentRecord.GetInt32(columnName);
         }
 
         public long GetInt64(int columnIndex)
         {
-            return GetValue<long>(columnIndex);
+            return CurrentRecord.GetInt64(columnIndex);
         }
 
         public long GetInt64(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetInt64(columnIndex);
+            return CurrentRecord.GetInt64(columnName);
         }
 
         public string GetName(int columnIndex)
         {
-            if (Layout == null)
-            {
-                throw new Exception("A layout is required for this method");
-            }
-            return Layout.Columns[columnIndex].Name;
+            return CurrentRecord.GetName(columnIndex);
         }
 
         public int GetOrdinal(string columnName)
         {
-            return GetColumnIndex(columnName, true);
+            return CurrentRecord.GetOrdinal(columnName);
         }
 
         public DataTable GetSchemaTable()
         {
-            throw new NotSupportedException();
+            return CurrentRecord.GetSchemaTable();
         }
 
         public string GetString(int columnIndex)
         {
-            return GetValue<string>(columnIndex);
+            return CurrentRecord.GetString(columnIndex);
         }
 
         public string GetString(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetString(columnIndex);
+            return CurrentRecord.GetString(columnName);
         }
 
         public object GetValue(int columnIndex)
         {
-            return this[columnIndex];
+            return CurrentRecord.GetValue(columnIndex);
         }
 
         public object GetValue(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return GetValue(columnIndex);
+            return CurrentRecord.GetValue(columnName);
         }
 
         public int GetValues(object[] values)
         {
-            throw new NotSupportedException();
+            return CurrentRecord.GetValues(values);
         }
 
         public object[] GetValues()
         {
-            return _values;
+            return CurrentRecord.GetValues();
         }
 
         public bool IsDBNull(int columnIndex)
         {
-            return this[columnIndex] == DBNull.Value;
+            return CurrentRecord.IsDBNull(columnIndex);
         }
 
         public bool IsDBNull(string columnName)
         {
-            var columnIndex = GetColumnIndex(columnName, true);
-            return IsDBNull(columnIndex);
+            return CurrentRecord.IsDBNull(columnName);
         }
 
         public bool NextResult()
@@ -471,30 +363,8 @@ namespace DataFile.Models
         public void Dispose()
         {
             Close();
-            if (_activeReader != null)
-            {
-                _activeReader.Dispose();
-            }
+            _activeReader?.Dispose();
         }
-        private int GetColumnIndex(string columnName, bool throwExceptionifNotFound = false)
-        {
-            var columnIndex = -1;
-            for (var index = 0; index < Layout.Columns.Count; index++)
-            {
-                var column = Layout.Columns[index];
-                if (column.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase))
-                {
-                    columnIndex = index;
-                }
-            }
-            if (throwExceptionifNotFound)
-            {
-                if (columnIndex == -1)
-                {
-                    throw new IndexOutOfRangeException("Column not found");
-                }
-            }
-            return columnIndex;
-        }
+        
     }
 }

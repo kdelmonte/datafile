@@ -13,34 +13,13 @@ namespace DataFile.Models.Readers
     {
         public string Path { get; set; }
         public DataFileLayout Layout { get; set; }
-        public int Depth
-        {
-            get
-            {
-                return 0;
-            }
-        }
-        public int FieldCount
-        {
-            get
-            {
-                return _values.Length;
-            }
-        }
-        public bool IsClosed
-        {
-            get
-            {
-                return !_open;
-            }
-        }
-        public int RecordsAffected
-        {
-            get
-            {
-                return -1;
-            }
-        }
+        public int Depth => 0;
+
+        public int FieldCount => _values.Length;
+
+        public bool IsClosed => !_open;
+
+        public int RecordsAffected => -1;
         private bool _open;
         private StreamReader _activeReader;
         private object[] _values;
@@ -50,10 +29,7 @@ namespace DataFile.Models.Readers
             get { throw new NotSupportedException(); }
         }
 
-        public object this[int columnIndex]
-        {
-            get { return _values[columnIndex]; }
-        }
+        public object this[int columnIndex] => _values[columnIndex];
 
         public SpaceDelimitedDataFileReader(string path, DataFileLayout layout)
         {
@@ -101,7 +77,7 @@ namespace DataFile.Models.Readers
                 return rtn;
             }
             if (Convert.IsDBNull(value)) return rtn;
-            var converter = TypeDescriptor.GetConverter(value.GetType());
+            var converter = TypeDescriptor.GetConverter(typeof(T));
             if (value is T)
             {
                 return (T) value;
@@ -271,10 +247,7 @@ namespace DataFile.Models.Readers
         public void Dispose()
         {
             Close();
-            if (_activeReader != null)
-            {
-                _activeReader.Dispose();
-            }
+            _activeReader?.Dispose();
         }
 
         private IEnumerable<object> ExtractValues(string stringToSplit)

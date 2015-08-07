@@ -56,6 +56,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Interfaces\IDataFileReader.cs" />
+    <Compile Include="Interfaces\IDataFileRecord.cs" />
     <Compile Include="Models\Database\DataFileQueryPredicate.cs" />
     <Compile Include="Interfaces\IDataFileQueryPredicate.cs" />
     <Compile Include="Models\DataFileExtension.cs" />
@@ -71,6 +72,9 @@
     <Compile Include="DataFileInfo.cs" />
     <Compile Include="DataFileInfo.Database.cs" />
     <Compile Include="Models\DataFileInformation.cs" />
+    <Compile Include="Models\DataFileRecord.cs" />
+    <Compile Include="Models\DataFileValueError.cs" />
+    <Compile Include="Models\DataFileValueValidity.cs" />
     <Compile Include="Models\Readers\SpaceDelimitedDataFileReader.cs" />
     <Compile Include="Models\Readers\CharacterDelimitedDataFileReader.cs" />
     <Compile Include="Models\Readers\ExcelDataFileReader.cs" />
@@ -78,7 +82,6 @@
     <Compile Include="Models\DataFileWriter.cs" />
     <Compile Include="Models\DataFileSaveSettings.cs" />
     <Compile Include="Models\Writers\ExcelDataFileWriter.cs" />
-    <Compile Include="Models\DirectorySummary.cs" />
     <Compile Include="Models\DataFileFormat.cs" />
     <Compile Include="Models\DataFileLayout.cs" />
     <Compile Include="Models\Database\Expression.cs" />
@@ -94,12 +97,12 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Models\Database\DataFileQuery.cs" />
     <Compile Include="Models\Database\PredicateExpression.cs" />
-    <Compile Include="Models\SplitMethod.cs" />
-    <Compile Include="Models\SplitOption.cs" />
-    <Compile Include="Models\DatabaseInterfaceType.cs" />
+    <Compile Include="Models\DataFileSplitMethod.cs" />
+    <Compile Include="Models\DataFileSplitOption.cs" />
+    <Compile Include="Models\DataFileDbInterfaceType.cs" />
     <Compile Include="Models\TransactSqlTableCreator.cs" />
     <Compile Include="Models\Utilities.cs" />
-    <Compile Include="Models\Validity.cs" />
+    <Compile Include="Models\DataFileValidity.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="SqlSessionProcedures\SqlServer\AlterTable.sql" />
