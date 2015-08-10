@@ -197,7 +197,7 @@ namespace DataFile
                 while (reader.Read())
                 {
                     var rowErrors = new List<DataFileValueValidity>();
-                    for (int index = 0; index < Layout.Columns.Count; index++)
+                    for (var index = 0; index < Layout.Columns.Count; index++)
                     {
                         var column = Layout.Columns[index];
                         var value = reader[index];

@@ -87,15 +87,6 @@ namespace DataFile.Models
         public DataFileValueValidity ValidateValue(object value)
         {
             var validity = new DataFileValueValidity();
-            if (DataType != null)
-            {
-                var convertedValue = ConvertValue(value);
-                if (convertedValue != null && convertedValue.GetType() != DataType)
-                {
-                    validity.Error.DataType = true;
-                }
-            }
-            
             var textValue = value?.ToString() ?? string.Empty;
             if (Required && textValue.Trim().Length == 0)
             {
@@ -117,6 +108,14 @@ namespace DataFile.Models
             }
             if (!string.IsNullOrWhiteSpace(textValue))
             {
+                if (DataType != null)
+                {
+                    var convertedValue = ConvertValue(value);
+                    if (convertedValue != null && convertedValue.GetType() != DataType)
+                    {
+                        validity.Error.DataType = true;
+                    }
+                }
                 if (AllowedValues != null)
                 {
                     if (!AllowedValues.Any(allowedValue => allowedValue.Equals(textValue, AllowedValuesComparison)))
