@@ -9,7 +9,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>DataFile</RootNamespace>
     <AssemblyName>DataFile</AssemblyName>
-    <TargetFrameworkVersion>v4.5.1</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
   </PropertyGroup>
@@ -33,18 +33,21 @@
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="EPPlus">
+    <Reference Include="EPPlus, Version=4.0.4.0, Culture=neutral, PublicKeyToken=ea159fdaa78159a1, processorArchitecture=MSIL">
       <HintPath>packages\EPPlus.4.0.4\lib\net20\EPPlus.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="Excel">
-      <HintPath>packages\ExcelDataReader.2.1.2.3\lib\net45\Excel.dll</HintPath>
+    <Reference Include="Excel, Version=2.1.2.3, Culture=neutral, PublicKeyToken=93517dbe6a4012fa, processorArchitecture=MSIL">
+      <HintPath>packages\ExcelDataReader.2.1.2.3\lib\net20\Excel.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="ICSharpCode.SharpZipLib">
+    <Reference Include="ICSharpCode.SharpZipLib, Version=0.86.0.518, Culture=neutral, PublicKeyToken=1b03e6acf1164f73, processorArchitecture=MSIL">
       <HintPath>packages\SharpZipLib.0.86.0\lib\20\ICSharpCode.SharpZipLib.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json, Version=7.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>packages\Newtonsoft.Json.7.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+      <HintPath>packages\Newtonsoft.Json.7.0.1\lib\net40\Newtonsoft.Json.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
@@ -105,6 +108,7 @@
     <Compile Include="Models\DataFileValidity.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="packages.config" />
     <None Include="SqlSessionProcedures\SqlServer\AlterTable.sql" />
     <None Include="SqlSessionProcedures\SqlServer\Delete.sql" />
     <None Include="SqlSessionProcedures\SqlServer\GetSchema.sql" />
@@ -113,9 +117,6 @@
     <None Include="SqlSessionProcedures\SqlServer\QueryToTable.sql" />
     <None Include="SqlSessionProcedures\SqlServer\Select.sql" />
     <None Include="SqlSessionProcedures\SqlServer\Update.sql" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
