@@ -134,6 +134,12 @@ namespace DataFile
             return reader;
         }
 
+        public DataFileWriter GetDataWriter()
+        {
+            var writer = new DataFileWriter(FullName, Layout);
+            return writer;
+        }
+        
         public void Dispose()
         {
             if (!DatabaseSessionActive || KeepSessionOpenOnDispose) return;

@@ -6,7 +6,7 @@ using DataFile.Models.Writers;
 
 namespace DataFile.Models
 {
-    class DataFileWriter:IDataFileWriter
+    public class DataFileWriter:IDataFileWriter
     {
         public Stream Stream { get; set; }
         public DataFileLayout Layout { get; set; }
