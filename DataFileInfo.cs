@@ -137,6 +137,7 @@ namespace DataFile
         public DataFileWriter GetDataWriter()
         {
             var writer = new DataFileWriter(FullName, Layout);
+            writer.Open();
             return writer;
         }
         

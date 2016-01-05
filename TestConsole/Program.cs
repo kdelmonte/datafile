@@ -12,7 +12,7 @@ namespace TestConsole
         static void Main(string[] args)
         {
             var start = DateTime.Now;
-            var targetFile = new FileInfo(@"C:\Users\kelvin.delmonte\Desktop\AgentMightTestFiles\Reference\Users.xlsx");
+            var targetFile = new FileInfo(@"C:\Users\kelvin.delmonte\Desktop\Book1.xlsx");
             Console.WriteLine("Processing {0}", targetFile.FullName);
             var transactSqlAdapter = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
             {
@@ -76,7 +76,10 @@ namespace TestConsole
                     }
                 }
             };
-            using (var dataFile = new DataFileInfo(targetFile.FullName, layout, transactSqlAdapter) { TableName = targetFile.Name })
+
+            // Test layout:
+            // var dataFile = new DataFileInfo(targetFile.FullName, layout, transactSqlAdapter)
+            using (var dataFile = new DataFileInfo(targetFile.FullName, transactSqlAdapter) { TableName = targetFile.Name })
             {
                 dataFile.Validate();
                 if (!dataFile.Validity.Valid)

@@ -221,7 +221,6 @@ namespace DataFile.Models.Database.Adapters
         public void ImportFile(DataFileInfo sourceFile)
         {
             var cn = new SqlConnection(ConnectionString);
-            FileInfo formatFile = null;
             DataFileInfo importFile = null;
             try
             {
@@ -232,49 +231,37 @@ namespace DataFile.Models.Database.Adapters
                 //Create Temporary Import File
                 importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(DataFileFormat.DatabaseImport, localImportFilePath, true) : sourceFile.Copy(localImportFilePath);
 
+                // Create table
+                cn.Open();
                 var targetTableName = BracketWrap(sourceFile.TableName);
                 var sqlBuilder = new List<string>
                 {
-                    $"CREATE TABLE {targetTableName} ({GetColumnsDeclarationStatement(sourceFile.Layout.Columns)})",
-                    $"BULK INSERT {targetTableName}",
-                    $"FROM '{importFile.FullName}'",
-                    "WITH ("
+                    $"CREATE TABLE {targetTableName} ({GetColumnsDeclarationStatement(sourceFile.Layout.Columns)})"
                 };
+                var cmd = new SqlCommand(JoinWithNewLines(sqlBuilder), cn) { CommandTimeout = CommandTimeout };
+                cmd.ExecuteNonQuery();
 
-                if (sourceFile.IsFixedWidth)
+                using (var bulkCopy = new SqlBulkCopy(cn))
                 {
-                    var formatFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + ".xml");
-                    CreateBcpFormatFile(sourceFile.Layout.Columns, formatFilePath);
-                    formatFile = new FileInfo(formatFilePath);
-                    sqlBuilder.Add($"FORMATFILE = '{formatFilePath}',");
-                    sqlBuilder.Add("ROWTERMINATOR = '\\r\\n',");
+                    bulkCopy.DestinationTableName = targetTableName;
+                    using (var dataFileReader = importFile.GetDataReader(true))
+                    {
+                        bulkCopy.WriteToServer(dataFileReader);
+                    }
                 }
-                else
-                {
-                    sqlBuilder.Add($"FIELDTERMINATOR = '{importFile.Layout.FieldDelimiter}',");
-                    sqlBuilder.Add("ROWTERMINATOR = '\\n',");
-                }
-                sqlBuilder.Add($"FIRSTROW = {(sourceFile.Layout.HasColumnHeaders ? 2 : 1)},");
-                sqlBuilder.Add("TABLOCK, KEEPNULLS");
-                sqlBuilder.Add(")");
 
+                sqlBuilder.Clear();
                 sqlBuilder.Add($"ALTER TABLE {targetTableName}");
                 sqlBuilder.Add("ADD ___RecordId INT IDENTITY (1, 1) NOT NULL, ___GroupId UNIQUEIDENTIFIER NULL");
 
-                var sqlText = JoinWithNewLines(sqlBuilder);
-                var cmd = new SqlCommand(sqlText, cn) {CommandTimeout = CommandTimeout };
-
-                cn.Open();
+                cmd = new SqlCommand(JoinWithNewLines(sqlBuilder), cn) { CommandTimeout = CommandTimeout };
                 cmd.ExecuteNonQuery();
+
                 importFile.Delete();
-                formatFile?.Delete();
             }
             finally
             {
-                if (formatFile != null && formatFile.Exists)
-                {
-                    formatFile.Delete();
-                }
+
                 if (importFile != null && importFile.Exists)
                 {
                     importFile.Delete();

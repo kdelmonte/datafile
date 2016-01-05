@@ -13,7 +13,7 @@ namespace DataFile.Models
 
         public int Depth => 0;
 
-        public int FieldCount => CurrentRecord.FieldCount;
+        public int FieldCount => CurrentRecord?.FieldCount ?? Layout.Columns.Count;
 
         public bool IsClosed => !_open;
 
