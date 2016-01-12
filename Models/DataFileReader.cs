@@ -91,7 +91,7 @@ namespace DataFile.Models
                 {
                     if (_columnsSpecified)
                     {
-                        for (var index = 0; index < _activeReader.FieldCount; index++)
+                        for (var index = 0; index < Layout.Columns.Count; index++)
                         {
                             object value = null;
                             if (index < Layout.Columns.Count)
