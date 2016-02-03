@@ -37,7 +37,6 @@ namespace DataFile.Models.Database.Adapters
         public string QueryBatchSeparator => $"{Environment.NewLine + Environment.NewLine}{"GO"}{Environment.NewLine + Environment.NewLine}";
 
         public string ConnectionString { get; set; }
-        public string FileImportDirectoryPath { get; set; }
         public int CommandTimeout { get; set; }
 
         private TransactSqlAdapter()
@@ -45,14 +44,13 @@ namespace DataFile.Models.Database.Adapters
             CommandTimeout = 30;
         }
 
-        public TransactSqlAdapter(string connectionString, string fileImportDirectoryPath):this()
+        public TransactSqlAdapter(string connectionString):this()
         {
             if (string.IsNullOrWhiteSpace(connectionString))
             {
                 throw new ArgumentException("The ConnectionString must be set in order to use this operation");
             }
             ConnectionString = connectionString;
-            FileImportDirectoryPath = fileImportDirectoryPath;
         }
 
         public string BuildQuery(DataFileQuery query)
@@ -224,13 +222,6 @@ namespace DataFile.Models.Database.Adapters
             DataFileInfo importFile = null;
             try
             {
-                var importDirectoryPath = string.IsNullOrEmpty(FileImportDirectoryPath) ? sourceFile.DirectoryName : FileImportDirectoryPath;
-
-                var localImportFilePath = Path.Combine(importDirectoryPath, sourceFile.TableName + DataFileInfo.DatabaseImportFileExtension);
-
-                //Create Temporary Import File
-                importFile = !sourceFile.IsFixedWidth ? sourceFile.SaveAs(DataFileFormat.DatabaseImport, localImportFilePath, true) : sourceFile.Copy(localImportFilePath);
-
                 // Create table
                 cn.Open();
                 var targetTableName = BracketWrap(sourceFile.TableName);

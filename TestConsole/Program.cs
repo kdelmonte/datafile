@@ -14,7 +14,7 @@ namespace TestConsole
             var start = DateTime.Now;
             var targetFile = new FileInfo(@"C:\Users\kelvin.delmonte\Desktop\Book1.xlsx");
             Console.WriteLine("Processing {0}", targetFile.FullName);
-            var transactSqlAdapter = new TransactSqlAdapter(Settings.Default.ConnString, Settings.Default.ImportDirectory)
+            var transactSqlAdapter = new TransactSqlAdapter(Settings.Default.ConnString)
             {
                 CommandTimeout = 0
             };
