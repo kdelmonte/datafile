@@ -231,7 +231,7 @@ namespace DataFile.Models.Database.Adapters
                 var cmd = new SqlCommand(JoinWithNewLines(sqlBuilder), cn) { CommandTimeout = CommandTimeout };
                 cmd.ExecuteNonQuery();
 
-                using (var bulkCopy = new SqlBulkCopy(cn))
+                using (var bulkCopy = new SqlBulkCopy(cn) { BulkCopyTimeout = CommandTimeout })
                 {
                     bulkCopy.DestinationTableName = targetTableName;
                     using (var dataFileReader = sourceFile.GetDataReader(true))
