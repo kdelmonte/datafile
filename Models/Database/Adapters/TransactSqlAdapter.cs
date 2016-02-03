@@ -219,7 +219,6 @@ namespace DataFile.Models.Database.Adapters
         public void ImportFile(DataFileInfo sourceFile)
         {
             var cn = new SqlConnection(ConnectionString);
-            DataFileInfo importFile = null;
             try
             {
                 // Create table
@@ -235,7 +234,7 @@ namespace DataFile.Models.Database.Adapters
                 using (var bulkCopy = new SqlBulkCopy(cn))
                 {
                     bulkCopy.DestinationTableName = targetTableName;
-                    using (var dataFileReader = importFile.GetDataReader(true))
+                    using (var dataFileReader = sourceFile.GetDataReader(true))
                     {
                         bulkCopy.WriteToServer(dataFileReader);
                     }
@@ -247,16 +246,9 @@ namespace DataFile.Models.Database.Adapters
 
                 cmd = new SqlCommand(JoinWithNewLines(sqlBuilder), cn) { CommandTimeout = CommandTimeout };
                 cmd.ExecuteNonQuery();
-
-                importFile.Delete();
             }
             finally
             {
-
-                if (importFile != null && importFile.Exists)
-                {
-                    importFile.Delete();
-                }
                 cn.Close();
             }
         }
