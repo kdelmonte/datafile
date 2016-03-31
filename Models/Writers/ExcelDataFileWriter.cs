@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using DataFile.Interfaces;
@@ -56,9 +57,17 @@ namespace DataFile.Models.Writers
             }
         }
 
-        public void Write(DataFileReader reader)
+        public void Write(IDataReader reader)
         {
-            Write(reader.GetValues());
+            while (reader.Read())
+            {
+                var values = new List<object>();
+                for (var x = 0; x < reader.FieldCount; x++)
+                {
+                    values.Add(reader.GetValue(x));
+                }
+                Write(values);
+            }
         }
 
         public void Close()

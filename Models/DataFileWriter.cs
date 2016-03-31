@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using DataFile.Interfaces;
 using DataFile.Models.Writers;
 
 namespace DataFile.Models
 {
-    public class DataFileWriter:IDataFileWriter
+    public class DataFileWriter: IDataFileWriter
     {
         public Stream Stream { get; set; }
         public DataFileLayout Layout { get; set; }
@@ -62,9 +63,17 @@ namespace DataFile.Models
             }
         }
 
-        public void Write(DataFileReader reader)
+        public void Write(IDataReader reader)
         {
-            Write(reader.GetValues());
+            while (reader.Read())
+            {
+                var values = new List<object>();
+                for (var x = 0; x < reader.FieldCount; x++)
+                {
+                    values.Add(reader.GetValue(x));
+                }
+                Write(values);
+            }
         }
 
         public void Close()

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using DataFile.Models;
 
@@ -12,7 +13,7 @@ namespace DataFile.Interfaces
 
         void Write(IEnumerable<object> values);
 
-        void Write(DataFileReader reader);
+        void Write(IDataReader reader);
 
         void Open();
 
