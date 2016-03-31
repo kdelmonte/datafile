@@ -74,6 +74,7 @@ namespace DataFile.Models.Writers
         {
             if (!_open) return;
             _activeWriter.Save();
+            Stream.Close();
             _open = false;
         }
 
