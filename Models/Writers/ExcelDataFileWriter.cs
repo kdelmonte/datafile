@@ -43,7 +43,7 @@ namespace DataFile.Models.Writers
                 for (var index = 0; index < valuesList.Count; index++)
                 {
                     var value = valuesList[index];
-                    _activeWorksheet.Cells[_position, index].Value = value;
+                    _activeWorksheet.Cells[_position + 1, index + 1].Value = value;
                 }
                 _position++;
             }
